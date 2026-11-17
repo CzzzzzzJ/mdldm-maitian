@@ -58,6 +58,14 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/m
 
 下载麦田和发布助手到 `~/maitian/`、接上发布 skill、打开安装向导；向导问完几个问题，生成配置、装好开机自启、打开各平台登录页。需要 macOS、Node.js ≥ 22.5、Google Chrome。
 
+Windows（社区贡献，感谢 [ajin558](https://github.com/ajin558)；开机自启暂未适配）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install-windows.ps1 | iex"
+```
+
+同样下载到 `%USERPROFILE%\maitian\`、接上发布 skill、打开安装向导，安装目录里另有 4 个双击启动器（演示 / 登录 / 体检 / 启动）。需要 Windows 10/11、Node.js ≥ 22.5、Google Chrome；缺 Git / Node 时脚本会用 winget 自动补装。开机自启暂未适配（向导里的 launchd 步骤会自动跳过），可用任务计划程序指向安装目录的 `4-start.bat` 代替。
+
 <p align="center"><img src="https://github.com/CzzzzzzJ/mdldm-maitian/releases/download/media/maitian-install.gif" width="720" alt="一行安装演示" /></p>
 
 <details>
@@ -221,6 +229,14 @@ iPhone 桌面 / 锁屏常驻显示全平台粉丝、今日涨粉、最新一期�
 - 📚 **知识站 [mdldm.club](https://www.mdldm.club/ai-course-promotion?utm_source=github&utm_medium=readme&utm_campaign=maitian)**：0 基础 AI Agent 课程 + 每周直播。麦田怎么搭、数据怎么采、怎么接自己的项目，课里讲得更细。
 - 🎬 B站 / 小红书 / 抖音 / 视频号：搜「麦当mdldm」
 - ▶️ [YouTube](https://www.youtube.com/channel/UCOz23ZQMefLAgDdnraGV2RQ) · 𝕏 [@czzzzzzJ_](https://x.com/czzzzzzJ_)
+
+### 交流群
+
+想一起聊麦田、多平台运营的，微信扫码进群（1、2 群已满，现在开的是 3 群）：
+
+<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 3 群" /></p>
+
+> 微信群码 7 天有效（这张 11 月 24 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
 
 觉得有用就点个 ⭐ Star，这是我继续改下去的动力；遇到问题直接提 [Issue](https://github.com/CzzzzzzJ/mdldm-maitian/issues)。
 

@@ -42,12 +42,24 @@ export const collectors = {
     }, { wait: 9000 });
     return c && { views: num(c.views), comments: num(c.comments), likes: num(c.likes) };
   },
-  async x({ url }) {
-    if (!/status\/\d+/.test(url || '')) return null;
-    const label = await withTab(url, (t) => evaluate(t, `(()=>{const a=document.querySelector('article');const g=a&&a.querySelector('[role=group][aria-label]');return g?g.getAttribute('aria-label'):null})()`), { wait: 10000 });
-    if (!label) return null;
-    const g = (k) => num((label.match(new RegExp('([\\d,.]+[KM]?)\\s+' + k, 'i')) || [])[1]) ?? 0;
-    return { views: g('views?'), likes: g('likes?'), comments: g('repl(?:y|ies)'), favorites: g('bookmarks?'), shares: g('reposts?') };
+  // X：视频帖 + 它引用的长文帖子一起算（长文链接记在任务备注里「长文 https://x.com/…/status/…」）
+  async x({ url, detail }) {
+    const one = async (u) => {
+      if (!/status\/\d+/.test(u || '')) return null;
+      const label = await withTab(u, (t) => evaluate(t, `(()=>{const a=document.querySelector('article');const g=a&&a.querySelector('[role=group][aria-label]');return g?g.getAttribute('aria-label'):null})()`), { wait: 10000 });
+      if (!label) return null;
+      const g = (k) => num((label.match(new RegExp('([\\d,.]+[KM]?)\\s+' + k, 'i')) || [])[1]) ?? 0;
+      return { views: g('views?'), likes: g('likes?'), comments: g('repl(?:y|ies)'), favorites: g('bookmarks?'), shares: g('reposts?') };
+    };
+    const v = await one(url);
+    const art = ((detail || '').match(/长文\s*(https:\/\/x\.com\/[^\s（）()]+?\/status\/\d+)/) || [])[1];
+    if (!art || art === url) return v;
+    await sleep(2000);
+    const a = await one(art);
+    if (!v && !a) return null;
+    const sum = (k) => (v?.[k] ?? 0) + (a?.[k] ?? 0);
+    return { views: sum('views'), likes: sum('likes'), comments: sum('comments'), favorites: sum('favorites'), shares: sum('shares'),
+      extra: { 视频帖播放: v?.views ?? null, 长文播放: a?.views ?? null } };
   },
   async instagram({ url }) {   // 在自己登录的页面里读这条 Reels 的作品信息（播放、赞、评论、转发）
     const sc = idOf(url, /\/reel\/([\w-]+)/); if (!sc) return null;
