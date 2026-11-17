@@ -436,7 +436,7 @@ try {
   else if (cmd === 'login') { await drv.openForLogin(ALL.map(i => LOGIN_PAGES[i])); console.log(`专用 Chrome 已打开 ${ALL.length} 个平台页面，登录完运行 hub doctor 检查`); }
   else if (cmd === 'followers') { await drv.ensure(); console.log(JSON.stringify(await collectFollowers(opt('--only') ? opt('--only').split(',') : null), null, 1)); }
   else if (cmd === 'daemon') await daemon();
-  else if (cmd === 'web') { const { startWeb } = await import('./web.mjs'); startWeb(); await new Promise(() => {}); }
+  else if (cmd === 'web') { const { startWeb } = await import('./web.mjs'); if (!startWeb()) process.exit(1); await new Promise(() => {}); }
   else if (cmd === 'status') {
     const list = args[1] && !args[1].startsWith('--') ? [getEpisode(args[1])].filter(Boolean) : episodes().slice(0, 5);
     if (!list.length) console.log('还没有记录');

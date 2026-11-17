@@ -202,7 +202,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 iPhone 桌面 / 锁屏常驻显示全平台粉丝、今日涨粉、最新一期播放、站点近 7 天注册和收入，点一下打开麦田。
 
 1. `config.json` 的 `web` 里加 `"widgetToken": "<一串随机字符>"`（只读口令，只能读 `/api/widget` 的汇总数字）；想在小组件上显示头像和署名，再加 `"avatar": "data/avatar.jpg"`、`"owner": "你的名字"`（中号、大号还会显示最新一期封面）
-2. 手机上登录麦田后打开 `/widget`，按页面提示装 [Scriptable](https://apps.apple.com/app/scriptable/id1405459188)、复制脚本（地址和口令已填好）。复制的是一个加载器：每次刷新从麦田的 `/api/widget/code` 拉最新的 `scripts/widget/maitian-widget.js` 来运行，以后改样式手机上自动生效，拉不到就用上次存下的那份
+2. 手机上登录麦田后打开 `/widget`，按页面提示装 [Scriptable](https://apps.apple.com/app/scriptable/id1405459188)、复制脚本（地址和口令已填好）。复制的是一个加载器：每次刷新从麦田的 `/api/widget/code` 拉最新的 `scripts/widget/maitian-widget.js` 来运行，以后改样式手机上自动生效，拉不到就用上次存下的那份。自动更新只在 https 地址（隧道）下用；从局域网 http 地址打开 `/widget` 复制到的是完整脚本，不自动更新，免得同一网络里有人替换代码
 3. 桌面添加 Scriptable 小组件（小 / 中 / 大），锁屏也可以加（长条 / 圆形 / 单行），Script 选它
 
 另外，Safari 里「分享 → 添加到主屏幕」可以把麦田当 App 用（全屏、带麦苗图标）。

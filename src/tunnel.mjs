@@ -9,7 +9,9 @@ import { notify, config } from './feishu.mjs';
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const OUT = path.join(ROOT, 'data', 'tunnel.json');
 const port = config.web?.port || 8787, key = config.web?.key;
-const named = config.tunnel?.name && config.tunnel?.hostname;
+const isHost = (h) => typeof h === 'string' && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(h);
+const named = !!config.tunnel?.name && isHost(config.tunnel?.hostname);
+if (config.tunnel && !named) console.error(`config.tunnel.hostname 不是域名（${config.tunnel.hostname}），改用临时地址；要固定域名见 README`);
 const CF = config.tunnel?.bin || '/opt/homebrew/bin/cloudflared';
 // QUIC 在不少网络下被拦，统一走 http2
 const args = named
@@ -18,7 +20,9 @@ const args = named
 const cf = spawn(CF, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
 async function publish(base) {
-  const url = named && (config.web?.access || config.web?.login === 'feishu') ? base : `${base}/?key=${key}`;   // 有登录页就不用带口令
+  // 有登录页就不把口令推出去：飞书验证码登录任何地址都能用；Cloudflare Access 只挂在固定域名上
+  const login = (config.web?.login === 'feishu' && config.feishuWebhook) || (named && config.web?.access);
+  const url = login || !key ? base : `${base}/?key=${key}`;
   let prev = null; try { prev = JSON.parse(fs.readFileSync(OUT, 'utf8')).url; } catch {}
   fs.writeFileSync(OUT, JSON.stringify({ url, base, at: new Date().toISOString(), mode: named ? 'named' : 'quick' }, null, 2));
   if (prev !== url) await notify(`🌐 麦田远程地址${named ? '（固定，不会再变）' : ''}：${url}`).catch(e => console.error(e.message));

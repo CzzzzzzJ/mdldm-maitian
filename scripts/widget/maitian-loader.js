@@ -7,6 +7,8 @@ const TOKEN = '__WIDGET_TOKEN__';
 const fm = FileManager.local(), CORE = fm.joinPath(fm.documentsDirectory(), 'maitian-core.js');
 let code = null;
 try {
+  // 拉来的代码会直接执行：只认 https，明文 http 可能被同一网络的人替换
+  if (!/^https:\/\//.test(MAITIAN)) throw new Error('只在 https 下自动更新');
   const r = new Request(`${MAITIAN}/api/widget/code?t=${encodeURIComponent(TOKEN)}`); r.timeoutInterval = 6;
   code = await r.loadString();
   if (r.response.statusCode !== 200 || !/Script\.complete\(\)/.test(code)) throw new Error('代码不完整');

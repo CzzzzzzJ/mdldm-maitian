@@ -51,10 +51,13 @@ function feed(n = 14) {
 }
 async function chromeUp() { try { const r = await fetch(`http://127.0.0.1:${config.chromePort || 9333}/json/version`, { signal: AbortSignal.timeout(800) }); return r.ok; } catch { return false; } }
 
-function widgetScript(req, file) {
+function widgetBase(req) {
   let base = `${req.headers['x-forwarded-proto'] || (req.headers['cf-visitor'] ? 'https' : 'http')}://${req.headers.host}`;
   try { base = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'tunnel.json'), 'utf8')).base || base; } catch {}
-  return fs.readFileSync(path.join(ROOT, 'scripts', 'widget', file), 'utf8').replace('__MAITIAN_URL__', base).replace('__WIDGET_TOKEN__', W.widgetToken);
+  return base;
+}
+function widgetScript(req, file) {
+  return fs.readFileSync(path.join(ROOT, 'scripts', 'widget', file), 'utf8').replace('__MAITIAN_URL__', widgetBase(req)).replace('__WIDGET_TOKEN__', W.widgetToken);
 }
 const latestPublished = () => episodes().filter(e => e.schedule && Date.parse(e.schedule) <= Date.now()).sort((a, b) => Date.parse(b.schedule) - Date.parse(a.schedule))[0];
 // 手机小组件：只读汇总（粉丝、涨幅、最新一期播放、站点近 7 天），用单独的 config.web.widgetToken，只能读这一个接口
@@ -79,14 +82,15 @@ function widgetData() {
     site: SITE && { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) },
     metricsDay: getMeta('metricsDay') || '', now: new Date().toISOString() };
 }
-const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const isHttps = req => req.headers['x-forwarded-proto'] === 'https' || /https/.test(req.headers['cf-visitor'] || '');
+const tokenEq = (a, b) => { if (typeof a !== 'string' || typeof b !== 'string') return false; const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 
-const widgetPage = (code) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>麦田小组件</title>
+const widgetPage = (code, auto) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>麦田小组件</title>
 <style>body{font-family:-apple-system,'PingFang SC',sans-serif;margin:0;padding:22px 18px 40px;background:#f6f1e6;color:#1c1a16;line-height:1.6}h1{font-size:24px;margin:0 0 6px}ol{padding-left:20px;font-size:15px}li{margin:6px 0}
 button{width:100%;height:50px;border:0;border-radius:14px;background:#1c1a16;color:#fff;font-size:17px;font-weight:800;margin:14px 0}pre{background:#fff;border-radius:12px;padding:12px;font-size:11px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all}
 .tip{font-size:13px;color:#7a7160}</style></head><body><h1>🌾 麦田小组件</h1>
-<ol><li>App Store 安装 <b>Scriptable</b>（免费）</li><li>点下面的按钮复制脚本（自动更新的加载器，只需粘贴这一次）</li><li>打开 Scriptable → 右上角 <b>＋</b> → 粘贴 → 标题改成「麦田」；已经有「麦田」脚本的，打开它全选、粘贴覆盖</li><li>长按桌面 → 左上角 <b>＋</b> → 搜 Scriptable → 选中号 → 添加；长按小组件 → 编辑小组件 → Script 选「麦田」</li><li>锁屏：长按锁屏 → 自定 → 添加小组件 → Scriptable → 同样选「麦田」</li></ol>
-<button id="b">复制脚本</button><p class="tip">以后小组件改样式，手机上会自动用上新版，不用再粘贴。脚本里带着小组件口令，只能读汇总数字（粉丝、播放、站点近 7 天），打不开麦田别的页面。别发给别人；泄露了在 config.json 换一个 widgetToken 即可。</p>
+<ol><li>App Store 安装 <b>Scriptable</b>（免费）</li><li>点下面的按钮复制脚本${auto ? '（自动更新的加载器，只需粘贴这一次）' : ''}</li><li>打开 Scriptable → 右上角 <b>＋</b> → 粘贴 → 标题改成「麦田」；已经有「麦田」脚本的，打开它全选、粘贴覆盖</li><li>长按桌面 → 左上角 <b>＋</b> → 搜 Scriptable → 选中号 → 添加；长按小组件 → 编辑小组件 → Script 选「麦田」</li><li>锁屏：长按锁屏 → 自定 → 添加小组件 → Scriptable → 同样选「麦田」</li></ol>
+<button id="b">复制脚本</button><p class="tip">${auto ? '以后小组件改样式，手机上会自动用上新版，不用再粘贴。' : '现在是 http 地址，脚本不自动更新（明文传输下自动拉代码可能被同一网络的人替换）；小组件改样式后回这里重新复制一次。配了 https 隧道后从隧道地址打开本页，就能用自动更新版。'}脚本里带着小组件口令，只能读汇总数字（粉丝、播放、站点近 7 天），打不开麦田别的页面。别发给别人；泄露了在 config.json 换一个 widgetToken 即可。</p>
 <pre id="c"></pre><script>const code=${JSON.stringify(code).replace(/</g, '\\u003c')};document.getElementById('c').textContent=code;
 document.getElementById('b').onclick=async()=>{try{await navigator.clipboard.writeText(code);b.textContent='已复制 ✓';}catch{const r=document.createRange();r.selectNodeContents(c);getSelection().removeAllRanges();getSelection().addRange(r);b.textContent='长按选中的文字复制';}};</script></body></html>`;
 
@@ -122,8 +126,9 @@ async function handle(req, res) {
   const LOGIN = W.login === 'feishu' && config.feishuWebhook;
   if (LOGIN && await handleLogin(req, res, u, send)) return;
   const cookieKey = ((req.headers.cookie || '').match(/mt_key=([^;]+)/) || [])[1];
-  if (W.key && cookieKey !== W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) {
-    if (u.searchParams.get('key') === W.key) return send(res, 302, '', 'text/plain', { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, location: '/' });
+  const keyOk = (v) => !!W.key && tokenEq(v, W.key);
+  if (!keyOk(cookieKey) && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) {
+    if (keyOk(u.searchParams.get('key'))) return send(res, 302, '', 'text/plain', { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax${isHttps(req) ? '; Secure' : ''}`, location: '/' });
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
   }
@@ -133,7 +138,9 @@ async function handle(req, res) {
   if (u.pathname === '/') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'board.html')), 'text/html; charset=utf-8');
   if (u.pathname === '/widget') {   // 小组件安装页（已登录才能看）：脚本里填好麦田地址和小组件口令，手机上一键复制
     if (!W.widgetToken) return send(res, 404, '<meta charset="utf-8">没配 config.web.widgetToken', 'text/html; charset=utf-8');
-    return send(res, 200, widgetPage(widgetScript(req, 'maitian-loader.js')), 'text/html; charset=utf-8');
+    // 加载器会执行麦田发来的代码：只在 https 下用；http（局域网）明文传输可能被同一网络的人替换，就给完整脚本、不自动更新
+    const auto = widgetBase(req).startsWith('https://');
+    return send(res, 200, widgetPage(widgetScript(req, auto ? 'maitian-loader.js' : 'maitian-widget.js'), auto), 'text/html; charset=utf-8');
   }
   if (u.pathname === '/api/overview') {
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
@@ -178,9 +185,11 @@ async function handle(req, res) {
   send(res, 404, { error: 'not found' });
 }
 export function startWeb() {
+  // 没有任何一道门（口令、飞书登录、Cloudflare Access）就不起：网页监听 0.0.0.0，局域网和隧道都能直接打开
+  if (!W.key && !(W.login === 'feishu' && config.feishuWebhook) && !(W.access?.team && W.access?.aud)) { console.error('麦田网页没起来：config.web.key 是空的。填一串随机字符当访问口令（node src/init.mjs 会自动生成）'); return null; }
   const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: e.message }); } catch {} }); });
   initLogin(ROOT);
-  srv.listen(W.port, '0.0.0.0', () => console.log(`麦田网页：http://localhost:${W.port}/?key=${W.key}`));
+  srv.listen(W.port, '0.0.0.0', () => console.log(`麦田网页：http://localhost:${W.port}/${W.key ? '?key=<config.web.key>' : ''}`));   // 口令不进日志
   srv.on('error', (e) => console.error('麦田网页没起来：' + e.message));
   return srv;
 }
