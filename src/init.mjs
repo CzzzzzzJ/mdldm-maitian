@@ -54,7 +54,7 @@ if (await yes('7. 有自己的网站（课程站/会员站）要看转化吗？'
     coursesApi: await ask('   课程列表接口', '/api/courses?admin=1'), dashboardApi: await ask('   数据汇总接口', '/api/admin/dashboard'), coursePath: '/series/{seriesId}?courseId={id}' };
   tip('接口返回格式见 src/site.mjs 顶部注释；站点要记下访客第一次带来的 utm_campaign 才能按期看转化');
 } else delete cfg.site;
-delete cfg.board; delete cfg.extensionId;
+delete cfg.board; delete cfg.extensionId; delete cfg.tunnel;   // tunnel 是固定域名的占位，留着会让隧道去找不存在的 tunnel；要固定域名见 README
 cfg.chromeProfile = path.join(ROOT, 'chrome-profile');
 
 if (fs.existsSync(CFG)) fs.copyFileSync(CFG, CFG + '.bak');
