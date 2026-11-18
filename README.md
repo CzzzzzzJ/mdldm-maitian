@@ -48,7 +48,19 @@
 
 链路：成片 → skill 写「发布素材.md」→ 生成 `publish.json` → `hub plan` 进分发计划 → `hub run` 分批填写 → 国内平台你点发布 → 到点取链接 → 每天采数据 → 大屏和飞书卡片。
 
-## 一行装好
+## 安装
+
+三种方式，按自己习惯挑一种。
+
+### Agent 自动安装
+
+不动手也能装：把下面这段话复制给你的 AI 助手（Claude Code / Codex 等）。它会读专门的[安装指引](agent-install.md)，自行装好麦田本体，并把发布 skill 装进**它自己**的 skill 目录——各 Agent 的 skill 目录不同，所以让 Agent 按指引自行安装，不依赖一行安装脚本里写死的 Claude 路径：
+
+```text
+请帮我接入麦田的发布能力：阅读 https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/agent-install.md 并严格按其中的步骤完成安装与授权。
+```
+
+### 一行装好
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install.sh)"
@@ -66,8 +78,7 @@ powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.c
 
 <p align="center"><img src="https://github.com/CzzzzzzJ/mdldm-maitian/releases/download/media/maitian-install.gif" width="720" alt="一行安装演示" /></p>
 
-<details>
-<summary><b>手动安装</b></summary>
+### 手动安装
 
 或者手动：
 
@@ -81,8 +92,6 @@ node src/hub.mjs doctor                 # 登录完检查各平台登录态和�
 ```
 
 打开向导最后给出的地址（`http://localhost:8787/?key=<web.key>`），之后浏览器会记住口令。手动安装也可以：`cp config.example.json config.json` 填好后跑 `scripts/install-launchd.sh`。
-
-</details>
 
 ### 三级上手
 
