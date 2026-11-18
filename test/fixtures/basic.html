@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>Ego Shim Fixture</title></head>
+<body>
+  <h1 id="heading">ego-shim fixture</h1>
+  <button id="btn" style="position:absolute;left:40px;top:120px;width:160px;height:48px">点我</button>
+  <span id="count">0</span>
+  <input id="text" style="position:absolute;left:40px;top:200px;width:300px">
+  <input id="file" type="file" multiple>
+  <div id="marker"></div>
+  <script>
+    const btn = document.getElementById('btn');
+    btn.addEventListener('click', () => {
+      const c = document.getElementById('count');
+      c.textContent = String(Number(c.textContent) + 1);
+    });
+  </script>
+</body>
+</html>
