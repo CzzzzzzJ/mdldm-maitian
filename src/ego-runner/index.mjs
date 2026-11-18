@@ -37,7 +37,8 @@ export function runEgoScript(source, { egoBin = 'ego-browser', timeoutMs = 10 * 
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', (e) => done({ ok: false, reason: 'spawn-failed', error: e.message }));
     child.on('close', (code, signal) => {
-      if (timedOut) return done({ ok: false, reason: 'timeout', error: `超过 ${timeoutMs}ms 被停掉`, code });
+      // 实测：不带 --session 时杀掉 CLI 不会停掉 Ego Node 服务里的脚本（spikes/results/03）
+      if (timedOut) return done({ ok: false, reason: 'timeout', error: `超过 ${timeoutMs}ms，已杀掉 ego-browser CLI；脚本可能仍在 Ego 里跑，别马上对同一个 space 起新任务`, code });
       done({ ...parseResult(stdout + stderr, code ?? (signal ? 128 : 1)), code: code ?? null, signal });
     });
     child.stdin.on('error', () => { /* 子进程没起来时写 stdin 会报 EPIPE，结果由 error/close 给出 */ });
