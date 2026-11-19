@@ -77,7 +77,7 @@ const rows = [];
 const raw = {};
 for (const a of ACCOUNTS) {
   if (args.only && !args.only.includes(a.code)) continue;
-  const sp = await openSpace(a);
+  const sp = await openSpace(a, { takeOver: !!args.takeOver });
   const row = { platformCode: a.code, spaceName: sp.name, spaceId: sp.id, created: sp.created, ownership: sp.state };
   rows.push(row);
   if (!sp.task) { row.login = sp.state === 'awaiting_user' ? 'awaiting_user' : 'unknown'; row.evidence = `space 在用户手里（${sp.state}），没动`; continue; }
