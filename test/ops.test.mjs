@@ -1,6 +1,7 @@
 // hub ops 核心行为（不需要 Ego Lite）：账号表、导入、能力位、登录检测、掉线提醒、写入口令。
 // 一律用临时目录里的 ops.db / .env，runner 和飞书通知都注入假的。
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach, after } from 'node:test';
+import './helpers/ops-dir.mjs';   // 锁目录指到临时目录（必须在加载 runner 之前）
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,6 +12,10 @@ import { checkLogins, scanLogin, ALERT_INTERVAL_MS } from '../src/ops/login.mjs'
 import { initTokens, checkToken, TOKEN_NAMES } from '../src/ops/tokens.mjs';
 
 const SEED = path.resolve(import.meta.dirname, '../src/ops/accounts.seed.json');
+const REPO = path.resolve(import.meta.dirname, '..');
+const repoLeftovers = () => ['data', '.env'].filter((f) => fs.existsSync(path.join(REPO, f)));
+const LEFTOVERS_BEFORE = repoLeftovers();
+after(() => { assert.deepEqual(repoLeftovers(), LEFTOVERS_BEFORE, '测试不应在仓库根下留下 data/ 或 .env'); });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ops-test-'));
 
 function freshDb() {
@@ -34,7 +39,7 @@ function fakeRunner(byPlatform) {
 const okResult = (result) => ({ ok: true, result });
 function fakeNotify() {
   const sent = [];
-  const notify = async (text) => { sent.push(text); };
+  const notify = async (text) => { sent.push(text); return true; };
   return { notify, sent };
 }
 
@@ -166,6 +171,37 @@ describe('登录检测 check', () => {
     });
   }
 
+  test('ok 但没读到 uid：已登记的、pending 的都不写 ok，记 unknown，退出码 1', async () => {
+    const { runTask } = fakeRunner({
+      GongZhongHao: okResult({ state: 'ok', evidence: '落地 URL 带 token；页面含登记的 gh_ id=false', uidSeen: null }),
+      YouTube: okResult({ state: 'ok', evidence: 'studio', uidSeen: '' }),
+    });
+    const r = await checkLogins(db, { platforms: ['GongZhongHao', 'YouTube'], runTask, notify: async () => {} });
+    assert.equal(r.exitCode, 1);
+    const gzh = getAccount(db, 'GongZhongHao:gh_eb2c407bc687');
+    assert.equal(gzh.loginState, 'unknown');
+    assert.match(gzh.loginEvidence, /没读到 uid/);
+    const yt = getAccount(db, 'YouTube:pending');
+    assert.ok(yt, 'pending 账号不应被改 uid');
+    assert.equal(yt.loginState, 'unknown');
+    for (const row of r.rows) assert.equal(row.result, 'failed');
+  });
+
+  for (const [label, result] of [['state 不合法', { state: 'logged-in', evidence: 'e', uidSeen: '478358005' }], ['缺 evidence', { state: 'ok', uidSeen: '478358005' }], ['result 不是对象', 'ok'], ['result 缺失', undefined]]) {
+    test(`结果结构不对（${label}）：记失败、不改登录状态，退出码 1`, async () => {
+      const ok = fakeRunner({ Bili: okResult({ state: 'ok', evidence: 'nav', uidSeen: '478358005' }) });
+      await checkLogins(db, { platform: 'Bili', runTask: ok.runTask, notify: async () => {}, now: () => 5 });
+      const before = getAccount(db, 'Bili:478358005');
+      const { runTask } = fakeRunner({ Bili: okResult(result) });
+      const r = await checkLogins(db, { platform: 'Bili', runTask, notify: async () => {}, now: () => 99999 });
+      assert.equal(r.exitCode, 1);
+      assert.equal(r.rows[0].result, 'failed');
+      const a = getAccount(db, 'Bili:478358005');
+      assert.equal(a.loginState, before.loginState);
+      assert.equal(a.loginCheckedAt, before.loginCheckedAt);
+    });
+  }
+
   test('知识站没配后台地址：记 unknown 并说明，不起任务', async () => {
     const { runTask, calls } = fakeRunner({});
     const r = await checkLogins(db, { platform: 'Zhishi', runTask, notify: async () => {}, siteAdmin: null });
@@ -205,6 +241,76 @@ describe('掉线提醒节流', () => {
     t += 1; await run('out');               // 超过 6 小时再掉：发
     assert.equal(n.sent.length, 2);
     assert.equal(ALERT_INTERVAL_MS, 6 * 3600_000);
+  });
+});
+
+describe('评审第 1 轮补发（Gemini）', () => {
+  test('昵称只在 UID 核对通过后写：错号的昵称不写进登记账号', async () => {
+    const db = freshDb();
+    const bad = fakeRunner({ Weibo: okResult({ state: 'ok', evidence: 'cfg', uidSeen: '999', nickname: '别人' }) });
+    await checkLogins(db, { platform: 'Weibo', runTask: bad.runTask, notify: async () => true });
+    assert.equal(getAccount(db, 'Weibo:2272770294').nickname, null);
+    const good = fakeRunner({ Weibo: okResult({ state: 'ok', evidence: 'cfg', uidSeen: '2272770294', nickname: '自己' }) });
+    await checkLogins(db, { platform: 'Weibo', runTask: good.runTask, notify: async () => true });
+    assert.equal(getAccount(db, 'Weibo:2272770294').nickname, '自己');
+    const ch = fakeRunner({ Channels: okResult({ state: 'ok', evidence: 'auth', uidSeen: 'sph_1', nickname: '视频号昵称' }) });
+    await checkLogins(db, { platform: 'Channels', runTask: ch.runTask, notify: async () => true });
+    assert.equal(getAccount(db, 'Channels:sph_1').nickname, '视频号昵称');
+  });
+
+  test('set-uid 带 @ 和空白会规范化，之后 check 不误报 UID 不符', async () => {
+    const db = freshDb();
+    assert.equal(setUid(db, 'X', ' @kinsolee79 '), 'X:kinsolee79');
+    assert.equal(getAccount(db, 'X:kinsolee79').spaceName, 'kinso/X/kinsolee79');
+    assert.equal(setUid(db, 'X', '@kinsolee79'), 'X:kinsolee79');
+    const n = fakeNotify();
+    const { runTask } = fakeRunner({ X: okResult({ state: 'ok', evidence: 'side', uidSeen: '@kinsolee79' }) });
+    const r = await checkLogins(db, { platform: 'X', runTask, notify: n.notify });
+    assert.equal(r.exitCode, 0);
+    assert.equal(getAccount(db, 'X:kinsolee79').loginState, 'ok');
+    assert.equal(n.sent.length, 0);
+    assert.throws(() => setUid(db, 'YouTube', ' @ '), /uid/);
+  });
+
+  test('导入清单里带 @ 的 uid 也规范化', () => {
+    const db = openOpsDb(path.join(tmp(), 'ops.db'));
+    const f = path.join(tmp(), 'seed.json');
+    fs.writeFileSync(f, JSON.stringify([{ platformCode: 'X', uid: '@kinsolee79' }]));
+    importAccounts(db, f);
+    assert.ok(getAccount(db, 'X:kinsolee79'));
+    assert.equal(importAccounts(db, f).inserted, 0);
+  });
+
+  test('掉线→恢复→6 小时内再掉线被节流，之后一直 out，7 小时后的检测要发提醒', async () => {
+    const db = freshDb();
+    const T0 = Date.parse('2026-11-19T00:00:00Z');
+    let t = T0;
+    const n = fakeNotify();
+    const seq = [];
+    const { runTask } = fakeRunner({ Douyin: () => okResult(seq.shift()) });
+    const run = async (state, at) => { t = at; seq.push({ state, evidence: state, uidSeen: state === 'ok' ? '106707338905' : null }); await checkLogins(db, { platform: 'Douyin', runTask, notify: n.notify, now: () => t }); };
+    await run('out', T0);
+    assert.equal(n.sent.length, 1);
+    await run('ok', T0 + 10 * 60_000);
+    await run('out', T0 + 20 * 60_000);
+    assert.equal(n.sent.length, 1);
+    await run('out', T0 + 7 * 3600_000);
+    assert.equal(n.sent.length, 2);
+  });
+
+  test('提醒没真的发出去（notify 返回 false）不记节流时间，补好后马上能发', async () => {
+    const db = freshDb();
+    let t = Date.parse('2026-11-19T00:00:00Z');
+    const { runTask } = fakeRunner({ Douyin: okResult({ state: 'out', evidence: 'status_code=8', uidSeen: null }) });
+    let tried = 0;
+    await checkLogins(db, { platform: 'Douyin', runTask, notify: async () => { tried++; return false; }, now: () => t });
+    assert.equal(tried, 1);
+    assert.equal(getAccount(db, 'Douyin:106707338905').alertSentAt, null);
+    t += 60_000;
+    const n = fakeNotify();
+    await checkLogins(db, { platform: 'Douyin', runTask, notify: n.notify, now: () => t });
+    assert.equal(n.sent.length, 1);
+    assert.equal(getAccount(db, 'Douyin:106707338905').alertSentAt, new Date(t).toISOString());
   });
 });
 

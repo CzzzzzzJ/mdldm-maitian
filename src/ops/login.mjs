@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { listAccounts, getAccount, migrateUid, accountId, PENDING, PLATFORM_NAMES } from './accounts.mjs';
+import { listAccounts, getAccount, migrateUid, accountId, normalizeUid, PENDING, PLATFORM_NAMES } from './accounts.mjs';
 import { ROOT, siteAdmin as configuredSiteAdmin } from './paths.mjs';
 
 export const ALERT_INTERVAL_MS = 6 * 3600_000;
@@ -41,12 +41,18 @@ export function exitCodeOf(rows) {
 
 const loadRunner = async () => (await import('../ego-runner/index.mjs')).runEgoTask;
 
-// 默认通知：feishu.mjs 在没有 config.json 时会 process.exit，所以先看配置在不在，再动态 import
+// 默认通知：feishu.mjs 在没有 config.json 时会 process.exit，所以先看配置在不在，再动态 import。
+// 返回 true 才算发出（没配置、没配飞书 webhook 返回 false，不记节流时间）。
+// quiet：feishu.mjs 不往 stdout 打「[飞书] …」（--json 的 stdout 要保持合法 JSON），日志自己写 stderr。
 export async function defaultNotify(text) {
+  const head = String(text).split('\n')[0];
   const cfg = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
-  if (!fs.existsSync(cfg)) { console.error(`没有 ${cfg}，飞书提醒没发：${text.split('\n')[0]}`); return; }
-  const { notify } = await import('../feishu.mjs');
-  await notify(text);
+  if (!fs.existsSync(cfg)) { console.error(`没有 ${cfg}，飞书提醒没发：${head}`); return false; }
+  const { config, notify } = await import('../feishu.mjs');
+  if (!config.feishuWebhook) { console.error(`config.json 没配 feishuWebhook，飞书提醒没发：${head}`); return false; }
+  console.error(`[飞书] ${head}`);
+  await notify(text, { quiet: true });
+  return true;
 }
 
 function selectAccounts(db, { ids, platform, platforms }) {
@@ -57,7 +63,6 @@ function selectAccounts(db, { ids, platform, platforms }) {
 
 const homeOf = (a, siteAdmin) => (a.platformCode === 'Zhishi' ? siteAdmin : PAGES[a.platformCode]?.home);
 const loginUrlOf = (a, siteAdmin) => (a.platformCode === 'Zhishi' ? siteAdmin : PAGES[a.platformCode]?.loginUrl);
-const normUid = (u) => (u == null || u === '' ? null : String(u).replace(/^@/, ''));
 
 function save(db, a, { loginState, evidence, at }) {
   db.prepare('UPDATE accounts SET loginState = ?, loginEvidence = ?, loginCheckedAt = ? WHERE platformCode = ? AND uid = ?')
@@ -67,7 +72,7 @@ function save(db, a, { loginState, evidence, at }) {
 async function alert(db, a, text, { notify, now }) {
   const last = a.alertSentAt ? Date.parse(a.alertSentAt) : null;
   if (last != null && now() - last < ALERT_INTERVAL_MS) return false;
-  await notify(text);
+  if ((await notify(text)) !== true) return false;   // 没真的发出去就不记，补好配置后下次还能发
   db.prepare('UPDATE accounts SET alertSentAt = ? WHERE platformCode = ? AND uid = ?').run(new Date(now()).toISOString(), a.platformCode, a.uid);
   return true;
 }
@@ -87,11 +92,13 @@ async function checkOne(db, a, { runTask, notify, now, siteAdmin }) {
   if (!r.ok && SKIP_EXIT[r.reason]) return { ...row, result: 'skipped', skipped: r.reason, loginState: a.loginState, message: `跳过：${SKIP_CN[r.reason]}（${r.reason}），登录状态没改` };
   if (!r.ok) return { ...row, result: 'failed', loginState: a.loginState, message: `runner 失败：${r.reason}${r.error ? ` ${String(r.error).slice(0, 160)}` : ''}，登录状态没改` };
 
-  const c = r.result ?? {};
-  const state = ['ok', 'out', 'unknown'].includes(c.state) ? c.state : 'unknown';
-  const evidence = String(c.evidence ?? '');
-  const seen = normUid(c.uidSeen);
-  if (c.nickname && !a.nickname) db.prepare('UPDATE accounts SET nickname = ? WHERE platformCode = ? AND uid = ?').run(String(c.nickname), a.platformCode, a.uid);
+  const c = r.result;
+  if (!c || typeof c !== 'object' || !['ok', 'out', 'unknown'].includes(c.state) || typeof c.evidence !== 'string' || !c.evidence) {
+    return { ...row, result: 'failed', loginState: a.loginState, message: `检测结果结构不对（state 要是 ok/out/unknown，evidence 要有内容），登录状态没改` };
+  }
+  const state = c.state;
+  const evidence = c.evidence;
+  const seen = normalizeUid(c.uidSeen);
 
   if (state === 'ok' && seen && a.uid !== PENDING && seen !== a.uid) {
     const message = `UID 不符：登记的是 ${a.uid}，页面上看到的是 ${seen}。没有写成 ok，这个账号先别用，请核对 space ${a.spaceName} 登的是哪个号`;
@@ -100,14 +107,24 @@ async function checkOne(db, a, { runTask, notify, now, siteAdmin }) {
     return { ...row, result: 'uid-mismatch', loginState: 'unknown', uidRegistered: a.uid, uidSeen: seen, message };
   }
 
+  if (state === 'ok' && !seen) {
+    // 没读到 uid 就没法核对（pending 的也没法登记），不能写成 ok
+    const message = `登录了但没读到 uid，没法核对（登记的是 ${a.uid}），没有写成 ok`;
+    save(db, a, { loginState: 'unknown', evidence: `${message}；${evidence}`, at });
+    return { ...row, result: 'failed', loginState: 'unknown', message };
+  }
+
   let id = a.id, message = evidence;
-  if (state === 'ok' && seen && a.uid === PENDING) {
+  if (state === 'ok' && a.uid === PENDING) {
     id = migrateUid(db, a.platformCode, PENDING, seen);
     message = `登记了真实 uid ${seen}（space 改为 kinso/${a.platformCode}/${seen}）；${evidence}`;
-  } else if (state === 'ok' && !seen) message = `${evidence}；没读到 uid，没核对`;
-  const cur = getAccount(db, id);
+  }
+  let cur = getAccount(db, id);
   save(db, cur, { loginState: state, evidence, at });
-  if (state === 'out' && a.loginState !== 'out') {
+  // 昵称只在 UID 核对通过（或 pending 登记成功）之后写，免得错号的昵称写进登记账号
+  if (state === 'ok' && c.nickname && !cur.nickname) db.prepare('UPDATE accounts SET nickname = ? WHERE platformCode = ? AND uid = ?').run(String(c.nickname), cur.platformCode, cur.uid);
+  // 只要这次是 out 就走 alert()，同一账号 6 小时最多一次由 alertSentAt 保证
+  if (state === 'out') {
     await alert(db, cur, `❌ ${a.platformName}账号掉线 | ${id}\n${evidence}\n扫码登录：hub ops login ${a.platformCode}`, { notify, now });
   }
   return { ...row, id, result: state, loginState: state, ...(seen ? { uidSeen: seen } : {}), message };
