@@ -39,7 +39,9 @@ hub ops tokens init                              # 生成写入口令到 .env，
 
 ## 掉线提醒
 
-账号从非 `out` 变成 `out`、或 UID 不符时发飞书卡片（`src/feishu.mjs` 的 `notify`），同一账号 6 小时最多一次，上次发送时间记在 `accounts.alertSentAt`。没有 `config.json` 时不发，只在 stderr 说明。
+检测结果是 `out`、或 UID 不符时发飞书卡片（`src/feishu.mjs` 的 `notify`，quiet 模式，日志只写 stderr），同一账号 6 小时最多一次，上次真正发出的时间记在 `accounts.alertSentAt`。没有 `config.json` 或没配 `feishuWebhook` 时不发、不记时间，只在 stderr 说明。
+
+uid 统一去首尾空白和前导 `@`（导入、`set-uid`、登记、检测比对都一样）；昵称只在 UID 核对通过后才写。
 
 ## 能力位
 

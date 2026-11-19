@@ -7,6 +7,13 @@ export const DEFAULT_PROFILE = 'Profile 5';
 export const CAPABILITIES = ['readWorks', 'readComments', 'readDM', 'reply', 'sendDM', 'likeComment', 'pinComment', 'deleteComment', 'block', 'setVisibility', 'publish'];
 export const PLATFORM_NAMES = { Douyin: '抖音', Channels: '视频号', XiaoHongShu: '小红书', Bili: 'B站', GongZhongHao: '公众号', Weibo: '微博', X: 'X', YouTube: 'YouTube', Instagram: 'Instagram', Zhishi: '知识站' };
 
+/** uid 统一写法：去首尾空白和前导 @（X 的 handle）。空的返回 null。导入、set-uid、迁移、检测比对都用它。 */
+export function normalizeUid(u) {
+  if (u == null) return null;
+  const s = String(u).trim().replace(/^@+/, '').trim();
+  return s || null;
+}
+
 export const spaceNameOf = (platformCode, uid) => `kinso/${platformCode}/${uid}`;
 export const accountId = (a) => `${a.platformCode}:${a.uid}`;
 const noCaps = () => JSON.stringify(Object.fromEntries(CAPABILITIES.map((c) => [c, false])));
@@ -46,7 +53,7 @@ export function importAccounts(db, file) {
   let inserted = 0, upgraded = 0, skipped = 0;
   for (const a of list) {
     if (!PLATFORM_NAMES[a.platformCode]) throw new Error(`清单里有不认识的 platformCode：${a.platformCode}`);
-    const uid = String(a.uid || PENDING);
+    const uid = normalizeUid(a.uid) ?? PENDING;
     const same = listAccounts(db, { platform: a.platformCode });
     if (same.some((x) => x.uid === uid) || (uid === PENDING && same.length)) { skipped++; continue; }
     if (same.some((x) => x.uid === PENDING)) { migrateUid(db, a.platformCode, PENDING, uid); upgraded++; continue; }
@@ -59,7 +66,7 @@ export function importAccounts(db, file) {
 
 /** 把一行的 uid（主键的一部分）改掉，spaceName 跟着改。目标行已存在时并进去、删掉旧行。返回新 id。 */
 export function migrateUid(db, platformCode, fromUid, toUid) {
-  toUid = String(toUid);
+  toUid = normalizeUid(toUid);
   if (!toUid || /[/\s]/.test(toUid) || toUid === PENDING) throw new Error(`uid 不合法：${toUid}`);
   if (fromUid === toUid) return `${platformCode}:${toUid}`;
   const target = db.prepare('SELECT 1 FROM accounts WHERE platformCode = ? AND uid = ?').get(platformCode, toUid);
@@ -72,7 +79,9 @@ export function migrateUid(db, platformCode, fromUid, toUid) {
 export function setUid(db, platformCode, uid) {
   const same = listAccounts(db, { platform: platformCode });
   if (!same.length) throw new Error(`表里没有 ${platformCode} 的账号，先 hub ops accounts import`);
-  if (same.some((x) => x.uid === String(uid))) return `${platformCode}:${uid}`;
+  uid = normalizeUid(uid);
+  if (!uid) throw new Error('uid 不能为空');
+  if (same.some((x) => x.uid === uid)) return `${platformCode}:${uid}`;
   const pending = same.find((x) => x.uid === PENDING);
   if (!pending) throw new Error(`${platformCode} 已登记 uid ${same.map((x) => x.uid).join(', ')}，没有 pending 的账号可改`);
   return migrateUid(db, platformCode, PENDING, uid);

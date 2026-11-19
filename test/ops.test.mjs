@@ -39,7 +39,7 @@ function fakeRunner(byPlatform) {
 const okResult = (result) => ({ ok: true, result });
 function fakeNotify() {
   const sent = [];
-  const notify = async (text) => { sent.push(text); };
+  const notify = async (text) => { sent.push(text); return true; };
   return { notify, sent };
 }
 
@@ -241,6 +241,76 @@ describe('掉线提醒节流', () => {
     t += 1; await run('out');               // 超过 6 小时再掉：发
     assert.equal(n.sent.length, 2);
     assert.equal(ALERT_INTERVAL_MS, 6 * 3600_000);
+  });
+});
+
+describe('评审第 1 轮补发（Gemini）', () => {
+  test('昵称只在 UID 核对通过后写：错号的昵称不写进登记账号', async () => {
+    const db = freshDb();
+    const bad = fakeRunner({ Weibo: okResult({ state: 'ok', evidence: 'cfg', uidSeen: '999', nickname: '别人' }) });
+    await checkLogins(db, { platform: 'Weibo', runTask: bad.runTask, notify: async () => true });
+    assert.equal(getAccount(db, 'Weibo:2272770294').nickname, null);
+    const good = fakeRunner({ Weibo: okResult({ state: 'ok', evidence: 'cfg', uidSeen: '2272770294', nickname: '自己' }) });
+    await checkLogins(db, { platform: 'Weibo', runTask: good.runTask, notify: async () => true });
+    assert.equal(getAccount(db, 'Weibo:2272770294').nickname, '自己');
+    const ch = fakeRunner({ Channels: okResult({ state: 'ok', evidence: 'auth', uidSeen: 'sph_1', nickname: '视频号昵称' }) });
+    await checkLogins(db, { platform: 'Channels', runTask: ch.runTask, notify: async () => true });
+    assert.equal(getAccount(db, 'Channels:sph_1').nickname, '视频号昵称');
+  });
+
+  test('set-uid 带 @ 和空白会规范化，之后 check 不误报 UID 不符', async () => {
+    const db = freshDb();
+    assert.equal(setUid(db, 'X', ' @kinsolee79 '), 'X:kinsolee79');
+    assert.equal(getAccount(db, 'X:kinsolee79').spaceName, 'kinso/X/kinsolee79');
+    assert.equal(setUid(db, 'X', '@kinsolee79'), 'X:kinsolee79');
+    const n = fakeNotify();
+    const { runTask } = fakeRunner({ X: okResult({ state: 'ok', evidence: 'side', uidSeen: '@kinsolee79' }) });
+    const r = await checkLogins(db, { platform: 'X', runTask, notify: n.notify });
+    assert.equal(r.exitCode, 0);
+    assert.equal(getAccount(db, 'X:kinsolee79').loginState, 'ok');
+    assert.equal(n.sent.length, 0);
+    assert.throws(() => setUid(db, 'YouTube', ' @ '), /uid/);
+  });
+
+  test('导入清单里带 @ 的 uid 也规范化', () => {
+    const db = openOpsDb(path.join(tmp(), 'ops.db'));
+    const f = path.join(tmp(), 'seed.json');
+    fs.writeFileSync(f, JSON.stringify([{ platformCode: 'X', uid: '@kinsolee79' }]));
+    importAccounts(db, f);
+    assert.ok(getAccount(db, 'X:kinsolee79'));
+    assert.equal(importAccounts(db, f).inserted, 0);
+  });
+
+  test('掉线→恢复→6 小时内再掉线被节流，之后一直 out，7 小时后的检测要发提醒', async () => {
+    const db = freshDb();
+    const T0 = Date.parse('2026-11-19T00:00:00Z');
+    let t = T0;
+    const n = fakeNotify();
+    const seq = [];
+    const { runTask } = fakeRunner({ Douyin: () => okResult(seq.shift()) });
+    const run = async (state, at) => { t = at; seq.push({ state, evidence: state, uidSeen: state === 'ok' ? '106707338905' : null }); await checkLogins(db, { platform: 'Douyin', runTask, notify: n.notify, now: () => t }); };
+    await run('out', T0);
+    assert.equal(n.sent.length, 1);
+    await run('ok', T0 + 10 * 60_000);
+    await run('out', T0 + 20 * 60_000);
+    assert.equal(n.sent.length, 1);
+    await run('out', T0 + 7 * 3600_000);
+    assert.equal(n.sent.length, 2);
+  });
+
+  test('提醒没真的发出去（notify 返回 false）不记节流时间，补好后马上能发', async () => {
+    const db = freshDb();
+    let t = Date.parse('2026-11-19T00:00:00Z');
+    const { runTask } = fakeRunner({ Douyin: okResult({ state: 'out', evidence: 'status_code=8', uidSeen: null }) });
+    let tried = 0;
+    await checkLogins(db, { platform: 'Douyin', runTask, notify: async () => { tried++; return false; }, now: () => t });
+    assert.equal(tried, 1);
+    assert.equal(getAccount(db, 'Douyin:106707338905').alertSentAt, null);
+    t += 60_000;
+    const n = fakeNotify();
+    await checkLogins(db, { platform: 'Douyin', runTask, notify: n.notify, now: () => t });
+    assert.equal(n.sent.length, 1);
+    assert.equal(getAccount(db, 'Douyin:106707338905').alertSentAt, new Date(t).toISOString());
   });
 });
 

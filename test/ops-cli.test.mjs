@@ -1,7 +1,10 @@
 // hub ops 命令行（不需要 Ego Lite）：没有 config.json 时 accounts、tokens 能跑；只写临时目录，不碰仓库的 data/ 和 .env。
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFile } from 'node:child_process';
+import http from 'node:http';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -62,5 +65,37 @@ describe('hub ops 命令行（没有 config.json）', () => {
     const h = hub('help');
     assert.equal(h.status, 0);
     assert.match(h.stdout, /tokens init/);
+  });
+});
+
+describe('默认飞书提醒（defaultNotify）', () => {
+  const LOGIN = pathToFileURL(path.join(ROOT, 'src', 'ops', 'login.mjs')).href;
+  const run = (env) => promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+    `const { defaultNotify } = await import(${JSON.stringify(LOGIN)}); console.error('RET=' + await defaultNotify('❌ 抖音账号掉线 | Douyin:1\\n详情'));`],
+    { env: { ...process.env, ...env } });
+
+  test('发出时 stdout 不出现任何内容（--json 的 stdout 保持合法 JSON），返回 true', async () => {
+    const got = [];
+    const server = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { got.push(b); res.end('{"code":0}'); }); });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    try {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-notify-'));
+      const cfg = path.join(dir, 'config.json');
+      fs.writeFileSync(cfg, JSON.stringify({ feishuWebhook: `http://127.0.0.1:${server.address().port}/hook`, rootPath: dir }));
+      const { stdout, stderr } = await run({ MAITIAN_CONFIG: cfg });
+      assert.equal(stdout, '');
+      assert.match(stderr, /RET=true/);
+      assert.equal(got.length, 1);
+    } finally { server.close(); }
+  });
+
+  test('没有 config.json、或没配 webhook：没发，返回 false，stdout 为空', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-notify-'));
+    let r = await run({ MAITIAN_CONFIG: path.join(dir, 'none.json') });
+    assert.equal(r.stdout, ''); assert.match(r.stderr, /RET=false/);
+    const cfg = path.join(dir, 'config.json');
+    fs.writeFileSync(cfg, JSON.stringify({ rootPath: dir }));
+    r = await run({ MAITIAN_CONFIG: cfg });
+    assert.equal(r.stdout, ''); assert.match(r.stderr, /RET=false/);
   });
 });
