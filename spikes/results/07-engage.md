@@ -92,13 +92,13 @@ spikes/platform/run.sh spikes/platform/07-engage-channels.mjs
 
 ## 脱敏样例
 
-各脚本输出里的 `sample` 已脱敏：第三方昵称和 uid 换成 `user_<sha256 前 8 位>`，正文只留前 6 个字。原始数据在 `scratch/07-*.json`（已 gitignore）。
+各脚本输出里的 `sample` 已脱敏：第三方昵称和 uid 换成 `user_<sha256 前 8 位>`，正文（评论、私信内容）一律换成 `<已脱敏>`。原始数据在 `scratch/07-*.json`（已 gitignore）。
 
 ```json
-{"platform":"视频号","dm":{"sessionId":"user_2e3ad0ee","peerUid":"user_6f83a1fe","peerNickname":"user_68da6265","unread":true,"lastType":1,"lastBy":"me","lastAt":"2026-11-17T16:12:03.000Z","lastMessage":"虚拟信用卡这…"}}
-{"platform":"视频号","comment":{"commentId":"15057219412199213204","nickname":"user_1208ce0d","text":"你用fabl…","time":"2026-11-18T00:07:08.000Z","replyCount":0}}
-{"platform":"小红书","comment":{"id":"7709325748931241644","type":"comment/comment","title":"评论了你的笔记","time":"2026-11-18T02:01:15.000Z","nickname":"user_191f784f","commentId":"6afd06e6000000002f036d96","text":"Claude…","noteId":"6afbd09e00000000250132bd"}}
-{"platform":"抖音","comment":{"commentId":"7709328922249741096","postId":"7708984451971452170","replyToNickname":"user_d7ed164c","uid":"user_aa2e9936","text":"哥你是怎么充…","time":"2026-11-18T02:13:37.000Z","replyCount":0}}
+{"platform":"视频号","dm":{"sessionId":"user_2e3ad0ee","peerUid":"user_6f83a1fe","peerNickname":"user_68da6265","unread":true,"lastType":1,"lastBy":"me","lastAt":"2026-11-17T16:12:03.000Z","lastMessage":"<已脱敏>"}}
+{"platform":"视频号","comment":{"commentId":"15057219412199213204","nickname":"user_1208ce0d","text":"<已脱敏>","time":"2026-11-18T00:07:08.000Z","replyCount":0}}
+{"platform":"小红书","comment":{"id":"7709325748931241644","type":"comment/comment","title":"评论了你的笔记","time":"2026-11-18T02:01:15.000Z","nickname":"user_191f784f","commentId":"6afd06e6000000002f036d96","text":"<已脱敏>","noteId":"6afbd09e00000000250132bd"}}
+{"platform":"抖音","comment":{"commentId":"7709328922249741096","postId":"7708984451971452170","replyToNickname":"user_d7ed164c","uid":"user_aa2e9936","text":"<已脱敏>","time":"2026-11-18T02:13:37.000Z","replyCount":0}}
 ```
 
 ## 不通过时的替代路线（只记录）
