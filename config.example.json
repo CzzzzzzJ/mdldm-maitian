@@ -19,6 +19,7 @@
 
   "keepAlive": ["channels"],
   "keepAliveMinutes": 60,
+  "disabled": [],
   "sampleHours": 6,
 
   "xHandle": "你的 X 用户名（不带 @）",
