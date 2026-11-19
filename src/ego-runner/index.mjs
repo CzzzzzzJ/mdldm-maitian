@@ -77,14 +77,22 @@ export async function runEgoTask({ space, script, profileId = DEFAULT_PROFILE, p
   return runEgoScript(buildTaskSource({ space, profileId, params, pluginDir, script }), { egoBin, timeoutMs });
 }
 
-/** 关掉指定名字的 space（不存在就什么都不做）。只动 kinso/ 开头的。 */
-export async function finishSpace(space, opts = {}) {
+/**
+ * 关掉指定名字的 space（不存在就什么都不做）。只动 kinso/ 开头、且在 profileId 上的；Profile 6 一律拒绝。
+ * 同名 space 在别的 profile 上时不接管、不关，返回 ok:false, reason:'profile-mismatch'。
+ */
+export async function finishSpace(space, { profileId = DEFAULT_PROFILE, ...opts } = {}) {
+  if (!profileId || profileId === FORBIDDEN_PROFILE) return { ok: false, reason: 'profile-rejected', error: `不允许使用 ${profileId || '空 profile'}` };
   if (!SPACE_NAME.test(space || '')) return { ok: false, reason: 'bad-space-name', error: space };
-  return runEgoScript(`const s = (await listTaskSpaces()).find((x) => x.name === ${JSON.stringify(space)});
+  const r = await runEgoScript(`const s = (await listTaskSpaces()).find((x) => x.name === ${JSON.stringify(space)});
+const want = ${JSON.stringify(profileId)};
 let r = { closed: false, existed: !!s };
-if (s) {
+if (s && s.profileId !== want) r = { closed: false, existed: true, mismatch: true, profileId: s.profileId ?? null };
+else if (s) {
   const t = s.ownership === "agent" ? await taskSpace(s.id) : s.ownership === "user" ? await claimTaskSpace(s.id) : null;
   if (t) r = { existed: true, ...(await t.finish({ keep: [] })) };
 }
 console.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(r));`, opts);
+  if (r.ok && r.result?.mismatch) return { ...r, ok: false, reason: 'profile-mismatch', error: `space ${space} 在 ${r.result.profileId} 上，不是 ${profileId}，没有关` };
+  return r;
 }

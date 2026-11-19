@@ -76,6 +76,18 @@ describe('ego-shim（真实 Ego Lite）', { skip: EGO_SKIP ?? false }, () => {
     assert.ok(r.urls.some((u) => u.endsWith('#keep')));
   });
 
+  test('打开失败：tabs.create 抛错，新开的页被关掉，space 页数不变', async () => {
+    const r = await run(space('create-fail'), `
+      await chrome.tabs.create({ url: params.FIXTURE + "#first", active: false });   // 先用掉自带的空白 p1
+      const before = (await task.tabs()).length;
+      // 1 号端口没人监听：连接被拒；goto 不抛就算没测到
+      let error = null;
+      try { await chrome.tabs.create({ url: "http://127.0.0.1:1/", active: false }); } catch (e) { error = e.message; }
+      return { error, before, after: (await task.tabs()).length, urls: (await task.tabs()).map((t) => t.url) };`);
+    assert.ok(r.error, `tabs.create 应该抛错：${r.urls.join(',')}`);
+    assert.equal(r.after, r.before, r.urls.join(','));
+  });
+
   test('未知 tabId：tabs.get 和 sendCommand 抛 No tab with id', async () => {
     const r = await run(space('unknown'), `
       const out = [];

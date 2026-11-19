@@ -115,7 +115,10 @@ describe('命令行入口', () => {
   test('从 stdin 读脚本跑完并 --finish 关掉 space', { skip: EGO_SKIP ?? false }, async () => {
     const space = tempSpaceName('cli');
     const r = await cli(['--space', space, '--params', '{"x":2}', '--finish'], 'return params.x * 21');
-    assert.equal(r.code, 0); assert.deepEqual(r.json, { ok: true, result: 42, code: 0, signal: null });
+    assert.equal(r.code, 0);
+    const { finish, ...task } = r.json;
+    assert.deepEqual(task, { ok: true, result: 42, code: 0, signal: null });
+    assert.equal(finish.ok, true); assert.equal(finish.result.closedSpace, true);
     const left = await runEgoScript(`console.log("@@RESULT " + JSON.stringify((await listTaskSpaces()).some((s) => s.name === ${JSON.stringify(space)})))`);
     assert.equal(left.result, false);
   });

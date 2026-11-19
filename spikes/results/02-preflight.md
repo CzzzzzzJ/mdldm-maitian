@@ -4,7 +4,7 @@
 
 - 2026-11-19 复测：插件有适配器的 7 个平台里，6 个已登录的（B站、小红书、抖音、视频号、YouTube、X）preflight 全部判为已登录，逐个跑和 7 个同时跑都一样，跑完每个 space 只剩自己的 `p1`。
 - 未登录的判断：Instagram space（189）现在停在 Instagram 的账号安全验证页（`/auth_platform/challengepicker/`），算未登录。preflight 返回 `ok:false`，**判断是对的，但要等满 60 秒**，原因写的是「上传页 60 秒没打开（可能没登录或网络慢）」，调用方分不清是没登录还是网慢。原因是插件的 `LOGIN_URL` 正则（`login|passport|signin|accounts.google.com|/i/flow/login`）不认 Instagram 的验证页路径。这是「部分」的原因。
-- 公众号、微博、知识站在插件里没有适配器（`lib/platforms/extra.js` 的 `adapters = {}`），不适用。知识站（190）也没有后台地址。
+- 公众号、微博、知识站在插件里没有适配器（`lib/platforms/extra.js` 的 `adapters = {}`），不适用。知识站（193，原 190）也没有后台地址。
 - 11-18 记的「抖音上传页等 `load` 超时」这次没有复现（不打补丁逐个跑 9.9 秒、同时跑 11.7 秒），但 `src/ego-shim.mjs:63` 还是 `await page.goto(url)`（默认等 `load`、15 秒超时），问题还在，只是这次页面加载得快。
 
 ## 怎么测

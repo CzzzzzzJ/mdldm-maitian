@@ -23,9 +23,10 @@ export const spaceName = (a) => `kinso/${a.code}/${a.uid}`;
 export const account = (code) => ACCOUNTS.find((a) => a.code === code);
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 第三方昵称、uid → user_<sha256 前 8 位>；正文只留前 6 个字
+// 第三方昵称、uid → user_<sha256 前 8 位>；正文换成 <已脱敏>
 export const anon = (s) => (s == null || s === '' ? s : `user_${createHash('sha256').update(String(s)).digest('hex').slice(0, 8)}`);
-export const clip = (s) => (s == null ? s : [...String(s)].length <= 6 ? String(s) : `${[...String(s)].slice(0, 6).join('')}…`);
+// 第三方正文（评论、私信内容）一律不留，只标明有没有内容（与 07-engage.md 的说明一致）
+export const clip = (s) => (s == null || s === '' ? s : '<已脱敏>');
 
 // 找同名 space 复用，没有才在 Profile 5 建。交给用户的不抢。
 // opts.takeOver：space 交给用户扫码后，复测脚本收回控制（只在用户说扫完之后用）

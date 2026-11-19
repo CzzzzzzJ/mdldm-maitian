@@ -59,9 +59,16 @@ export function createEgoChrome(task) {
     scripting: { executeScript: async () => { throw new Error('Ego Lite 垫片不支持 scripting'); } },
     tabs: {
       async create({ url, active = false } = {}) {
-        const page = (await blankFirstPage()) ?? (await task.newPage());
-        if (url) await page.goto(url);
-        if (active) await page.cdp('Page.bringToFront');
+        const reused = await blankFirstPage();
+        const page = reused ?? (await task.newPage());
+        try {
+          if (url) await page.goto(url);
+          if (active) await page.cdp('Page.bringToFront');
+        } catch (e) {
+          // 新开的页出错就关掉，免得长期 space 里留下孤儿页；复用的空白首页是 space 自带的，不关
+          if (!reused) await page.close().catch(() => {});
+          throw e;
+        }
         return { id: idOf(page.label), url, windowId };
       },
       async get(id) { return info(id, await liveTab(id)); },
