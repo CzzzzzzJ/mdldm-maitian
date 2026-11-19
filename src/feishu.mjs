@@ -1,6 +1,6 @@
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
+export const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 if (!fs.existsSync(CFG)) { console.error('还没有 config.json：先运行 node src/init.mjs（安装向导），或者 node src/demo.mjs 用假数据看看效果'); process.exit(1); }
 export const config = JSON.parse(fs.readFileSync(CFG, 'utf8'));
 
