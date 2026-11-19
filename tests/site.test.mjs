@@ -27,3 +27,11 @@ test('refreshSite 跟随 config 变化', () => {
   config.site.enabled = false;
   assert.equal(refreshSite(), null);
 });
+
+test('启用标志：看 config.site.enabled，不看 base 是否为空', async () => {
+  const { siteOn } = await import('../src/site.mjs');
+  assert.equal(siteOn(null), false);                       // 从没配过
+  assert.equal(siteOn({}), true);                          // 配了、没写 enabled → 默认启用
+  assert.equal(siteOn({ enabled: true, base: '' }), true); // 启用但还没填地址
+  assert.equal(siteOn({ enabled: false, base: 'https://a.com' }), false);
+});

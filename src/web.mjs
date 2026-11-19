@@ -2,7 +2,7 @@
 import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
-import { SITE, refreshSite } from './site.mjs';
+import { SITE, siteOn, refreshSite } from './site.mjs';
 import { applyFeishuPatch, applySitePatch, saveConfig, testSite } from './config-admin.mjs';
 import { learnOn, learnUrl } from './learn.mjs';
 import { review } from './review.mjs';
@@ -119,7 +119,7 @@ function integrations() {
   return {
     feishu: { webhook: config.feishuWebhook || '', login: W.login === 'feishu', lastTest: metaJson('integrations.feishu.lastTest') },
     site: {
-      enabled: !!SITE, name: cs.name || '', base: cs.base || '',
+      enabled: siteOn(), name: cs.name || '', base: cs.base || '',
       adminPath: cs.adminPath || '/admin', coursesApi: cs.coursesApi || '/api/courses?admin=1',
       dashboardApi: cs.dashboardApi || '/api/admin/dashboard', coursePath: cs.coursePath || '/series/{seriesId}?courseId={id}',
       logo: cs.logo || '', lastTest: metaJson('integrations.site.lastTest'), summary,
@@ -196,7 +196,7 @@ async function handle(req, res) {
   if (u.pathname === '/api/integrations/site' && req.method === 'POST') {
     const a = await readJson(req), backup = snapConfig();
     try {
-      applySitePatch(config, { enabled: a.enabled === true, name: a.name, base: a.base, adminPath: a.adminPath, coursesApi: a.coursesApi, dashboardApi: a.dashboardApi, coursePath: a.coursePath, logo: a.logo });
+      applySitePatch(config, { enabled: a.enabled === undefined ? undefined : a.enabled === true, name: a.name, base: a.base, adminPath: a.adminPath, coursesApi: a.coursesApi, dashboardApi: a.dashboardApi, coursePath: a.coursePath, logo: a.logo });
       saveConfig(config);
     } catch (e) { rollbackConfig(backup); return send(res, 500, { error: '写配置失败：' + e.message }); }
     refreshSite();
@@ -204,7 +204,7 @@ async function handle(req, res) {
   }
   if (u.pathname === '/api/integrations/feishu/test' && req.method === 'POST') {
     const a = await readJson(req);
-    const r = await testFeishu(String(a.webhook || '').trim() || config.feishuWebhook);
+    const r = await testFeishu(a.webhook === undefined ? config.feishuWebhook : String(a.webhook).trim());
     setMeta('integrations.feishu.lastTest', JSON.stringify({ ...r, ts: new Date().toISOString() }));
     return send(res, 200, r);
   }

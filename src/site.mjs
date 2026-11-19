@@ -10,6 +10,8 @@ import { config } from './feishu.mjs';
 
 // 启用判定：没有 base 的一律视为未启用（从没配过站点时卡片默认是关）
 export function siteEnabled(s = config.site) { return !!(s && s.base) && s.enabled !== false; }
+// 卡片「启用」开关看的是标志位（哪怕还没填地址），与 SITE 是否可用（要求 base）分开
+export function siteOn(s = config.site) { return !!(s && s.enabled !== false); }
 // 配置改动后重新计算 SITE；ES module 的 live binding 让所有 import 方自动拿到新值
 export function refreshSite() {
   const s = siteEnabled() ? config.site : null;

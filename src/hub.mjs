@@ -134,7 +134,9 @@ async function run() {
   // 停用的平台：直接标跳过，不参与这一轮
   const off = todo.filter(id => DISABLED.has(id));
   for (const id of off) setTask(ep.id, id, 'skipped', '已在系统里停用');
-  if (off.length) { todo = todo.filter(id => !DISABLED.has(id)); console.log(`已停用、跳过：${off.map(i => NAMES[id]).join('、')}`); }
+  if (off.length) { todo = todo.filter(id => !DISABLED.has(id)); console.log(`已停用、跳过：${off.map(i => NAMES[i]).join('、')}`); }
+  // 知识站已停用（系统页开关）：不进这一轮
+  if (!SITE && todo.includes('zsz')) { setTask(ep.id, 'zsz', 'skipped', '已在系统里停用'); todo = todo.filter(i => i !== 'zsz'); console.log('知识站已停用，跳过'); }
   // X 长文模式（长文 + 视频帖引用长文）：不走插件填写，定时前 25 分钟由守护进程调长文脚本
   if (todo.includes('x') && pj.platforms.x.mode === 'article+quote') {
     if (!articleOn()) throw new Error('这期 X 是长文模式，只在作者自己的本地插件环境里可用；把 publish.json 里 X 的 mode 去掉，按普通视频帖发');
@@ -377,11 +379,11 @@ async function daemon() {
         const sched = ep.schedule ? Date.parse(ep.schedule) : 0;
         // 知识站：到了定时前 ZSZ_LEAD 分钟自动建课；已建的课复查是否真正上线
         const zt = tasks.find(t => t.platform === 'zsz');
-        if (zt && zt.state === 'pending' && sched && Date.now() >= sched - ZSZ_LEAD * MIN && Date.now() < sched + 6 * 60 * MIN && every(`zszrun:${ep.id}`, 20 * MIN)) {
+        if (SITE && zt && zt.state === 'pending' && sched && Date.now() >= sched - ZSZ_LEAD * MIN && Date.now() < sched + 6 * 60 * MIN && every(`zszrun:${ep.id}`, 20 * MIN)) {
           log(ep.id, 'zsz', 'deferred-run', '定时前自动建课');
           execFileSync('node', [path.join(path.dirname(new URL(import.meta.url).pathname), 'hub.mjs'), 'run', ep.dir, '--only', 'zsz'], { stdio: 'inherit', timeout: 40 * MIN });
         }
-        if (zt && zt.state === 'scheduled' && every(`zszcheck:${ep.id}`, 10 * MIN)) {
+        if (SITE && zt && zt.state === 'scheduled' && every(`zszcheck:${ep.id}`, 10 * MIN)) {
           const pj0 = loadProject(ep.dir); const cs = await zszCourses(pj0.platforms.zsz.title).catch(() => []);
           if (cs.length === 1 && cs[0].vis === 'published') { setTask(ep.id, 'zsz', 'published', '已上线', { url: SITE.courseUrl(cs[0]) }); await notify(`✅ ${ep.name}\n知识站：已上线`); }
         }
