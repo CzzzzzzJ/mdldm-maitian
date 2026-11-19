@@ -1,7 +1,10 @@
+import './helpers/ops-dir.mjs';   // 锁目录指到临时目录
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { runEgoTask, runEgoScript, parseResult, finishSpace } from '../src/ego-runner/index.mjs';
 import { EGO_SKIP, tempSpaceName } from './helpers/ego.mjs';
+import { LOCKS_DIR } from './helpers/ops-dir.mjs';
+import { readLock, spaceLockPath } from '../src/ego-runner/locks.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -91,6 +94,28 @@ describe('runEgoTask 真实 Ego Lite', { skip: EGO_SKIP ?? false }, () => {
     const r = await runEgoTask({ space, script: 'console.log("@@RESULT 1"); process.exit(3)' });
     assert.equal(r.ok, false); assert.equal(r.reason, 'exit-code'); assert.equal(r.code, 3);
   });
+  test('Ego 里的脚本自己写心跳文件；结束后锁释放', async () => {
+    const lockPath = spaceLockPath(LOCKS_DIR, space);
+    const running = runEgoTask({ space, heartbeatMs: 200, script: 'await new Promise((r) => setTimeout(r, 2000)); return 1' });
+    let seen = null;
+    for (let i = 0; i < 30 && !seen; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const l = readLock(lockPath);
+      if (l && l.heartbeatAt > l.startedAt) seen = l;
+    }
+    const r = await running;
+    assert.equal(r.ok, true, r.error);
+    assert.ok(seen, '运行期间锁的心跳时间应由脚本更新');
+    assert.equal(r.lockReleased, true);
+    assert.equal(readLock(lockPath), null);
+  });
+  test('脚本到截止时间自己退出，reason=deadline，锁已释放', async () => {
+    const t0 = Date.now();
+    const r = await runEgoTask({ space, timeoutMs: 6000, script: 'await new Promise(() => {})' });
+    assert.equal(r.reason, 'deadline', r.stderr + r.stdout);
+    assert.ok(Date.now() - t0 < 6000);
+    assert.equal(r.lockReleased, true);
+  });
   test('脚本里能加载插件 lib', async () => {
     const r = await runEgoTask({ space, script: 'const cdp = await loadPlugin("lib/cdp.js"); const pub = await loadPlugin("lib/publish.js"); return { evaluate: typeof cdp.evaluate, preflight: typeof pub.preflight }' });
     assert.equal(r.ok, true, r.error);
@@ -117,7 +142,7 @@ describe('命令行入口', () => {
     const r = await cli(['--space', space, '--params', '{"x":2}', '--finish'], 'return params.x * 21');
     assert.equal(r.code, 0);
     const { finish, ...task } = r.json;
-    assert.deepEqual(task, { ok: true, result: 42, code: 0, signal: null });
+    assert.deepEqual(task, { ok: true, result: 42, code: 0, signal: null, lockReleased: true });
     assert.equal(finish.ok, true); assert.equal(finish.result.closedSpace, true);
     const left = await runEgoScript(`console.log("@@RESULT " + JSON.stringify((await listTaskSpaces()).some((s) => s.name === ${JSON.stringify(space)})))`);
     assert.equal(left.result, false);

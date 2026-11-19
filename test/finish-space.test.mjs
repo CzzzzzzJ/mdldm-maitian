@@ -1,4 +1,5 @@
 // finishSpace 和 cli --finish 的 profile 门禁（不需要 Ego Lite）：用 test/fixtures/fake-ego/ego-browser 代替真 CLI。
+import './helpers/ops-dir.mjs';   // 锁目录指到临时目录
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
