@@ -21,6 +21,7 @@ hub ops tokens init                              # 生成写入口令到 .env，
 - 每个账号起一个 runner 任务，在 space 里打开后台首页（`waitUntil: "commit"` 再等 6 秒），按平台判断登录、读当前 uid。判断方法照搬 `spikes/platform/spaces.mjs`，代码在 `src/ops/space-check.mjs`。
 - uid 是 `pending` 的账号读到真实 uid 时登记进去（视频号 `finderUser.uniqId`、X handle 去掉 `@`、YouTube `UC…`、Instagram 用户名），space 名跟着改。
 - **UID 和登记的不符**：不写 ok（记 `unknown`，证据写明两个 uid），发提醒，整条命令退出码 2。
+- 页面显示已登录但没读到 uid（例如公众号落地带 token 但页面里找不到 gh_ id）：不写 ok，记 `unknown`，算失败。
 - runner 返回 `busy` / `user-controlled` / `profile-needed`：这个账号跳过，登录状态不改。
 - 知识站没配 `site.admin`：记 `unknown` 并说明，不起任务。
 - 输出和证据里不放 cookie、token（公众号只记「带 token」）。
@@ -31,7 +32,7 @@ hub ops tokens init                              # 生成写入口令到 .env，
 |---|---|
 | 0 | 全部检测完（结果是 out 或 unknown 也是 0，掉线看提醒和 `loginState`） |
 | 2 | 有账号 UID 不符 |
-| 1 | 有 runner 失败（timeout、exit-code 等） |
+| 1 | 有检测失败：runner 失败（timeout、exit-code 等）、检测结果结构不对、或页面显示已登录但没读到 uid（没法核对，记 `unknown`） |
 | 3 | 有账号跳过：`profile-needed` |
 | 4 | 有账号跳过：`user-controlled`（扫码登录等了 30 分钟还没交还也是 4） |
 | 5 | 有账号跳过：`busy` |

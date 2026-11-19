@@ -1,6 +1,7 @@
 // hub ops 核心行为（不需要 Ego Lite）：账号表、导入、能力位、登录检测、掉线提醒、写入口令。
 // 一律用临时目录里的 ops.db / .env，runner 和飞书通知都注入假的。
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach, after } from 'node:test';
+import './helpers/ops-dir.mjs';   // 锁目录指到临时目录（必须在加载 runner 之前）
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,6 +12,10 @@ import { checkLogins, scanLogin, ALERT_INTERVAL_MS } from '../src/ops/login.mjs'
 import { initTokens, checkToken, TOKEN_NAMES } from '../src/ops/tokens.mjs';
 
 const SEED = path.resolve(import.meta.dirname, '../src/ops/accounts.seed.json');
+const REPO = path.resolve(import.meta.dirname, '..');
+const repoLeftovers = () => ['data', '.env'].filter((f) => fs.existsSync(path.join(REPO, f)));
+const LEFTOVERS_BEFORE = repoLeftovers();
+after(() => { assert.deepEqual(repoLeftovers(), LEFTOVERS_BEFORE, '测试不应在仓库根下留下 data/ 或 .env'); });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ops-test-'));
 
 function freshDb() {
@@ -163,6 +168,37 @@ describe('登录检测 check', () => {
       assert.equal(after.loginState, before.loginState);
       assert.equal(after.loginCheckedAt, before.loginCheckedAt);
       assert.equal(n.sent.length, 0);
+    });
+  }
+
+  test('ok 但没读到 uid：已登记的、pending 的都不写 ok，记 unknown，退出码 1', async () => {
+    const { runTask } = fakeRunner({
+      GongZhongHao: okResult({ state: 'ok', evidence: '落地 URL 带 token；页面含登记的 gh_ id=false', uidSeen: null }),
+      YouTube: okResult({ state: 'ok', evidence: 'studio', uidSeen: '' }),
+    });
+    const r = await checkLogins(db, { platforms: ['GongZhongHao', 'YouTube'], runTask, notify: async () => {} });
+    assert.equal(r.exitCode, 1);
+    const gzh = getAccount(db, 'GongZhongHao:gh_eb2c407bc687');
+    assert.equal(gzh.loginState, 'unknown');
+    assert.match(gzh.loginEvidence, /没读到 uid/);
+    const yt = getAccount(db, 'YouTube:pending');
+    assert.ok(yt, 'pending 账号不应被改 uid');
+    assert.equal(yt.loginState, 'unknown');
+    for (const row of r.rows) assert.equal(row.result, 'failed');
+  });
+
+  for (const [label, result] of [['state 不合法', { state: 'logged-in', evidence: 'e', uidSeen: '478358005' }], ['缺 evidence', { state: 'ok', uidSeen: '478358005' }], ['result 不是对象', 'ok'], ['result 缺失', undefined]]) {
+    test(`结果结构不对（${label}）：记失败、不改登录状态，退出码 1`, async () => {
+      const ok = fakeRunner({ Bili: okResult({ state: 'ok', evidence: 'nav', uidSeen: '478358005' }) });
+      await checkLogins(db, { platform: 'Bili', runTask: ok.runTask, notify: async () => {}, now: () => 5 });
+      const before = getAccount(db, 'Bili:478358005');
+      const { runTask } = fakeRunner({ Bili: okResult(result) });
+      const r = await checkLogins(db, { platform: 'Bili', runTask, notify: async () => {}, now: () => 99999 });
+      assert.equal(r.exitCode, 1);
+      assert.equal(r.rows[0].result, 'failed');
+      const a = getAccount(db, 'Bili:478358005');
+      assert.equal(a.loginState, before.loginState);
+      assert.equal(a.loginCheckedAt, before.loginCheckedAt);
     });
   }
 

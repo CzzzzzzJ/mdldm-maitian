@@ -87,9 +87,12 @@ async function checkOne(db, a, { runTask, notify, now, siteAdmin }) {
   if (!r.ok && SKIP_EXIT[r.reason]) return { ...row, result: 'skipped', skipped: r.reason, loginState: a.loginState, message: `跳过：${SKIP_CN[r.reason]}（${r.reason}），登录状态没改` };
   if (!r.ok) return { ...row, result: 'failed', loginState: a.loginState, message: `runner 失败：${r.reason}${r.error ? ` ${String(r.error).slice(0, 160)}` : ''}，登录状态没改` };
 
-  const c = r.result ?? {};
-  const state = ['ok', 'out', 'unknown'].includes(c.state) ? c.state : 'unknown';
-  const evidence = String(c.evidence ?? '');
+  const c = r.result;
+  if (!c || typeof c !== 'object' || !['ok', 'out', 'unknown'].includes(c.state) || typeof c.evidence !== 'string' || !c.evidence) {
+    return { ...row, result: 'failed', loginState: a.loginState, message: `检测结果结构不对（state 要是 ok/out/unknown，evidence 要有内容），登录状态没改` };
+  }
+  const state = c.state;
+  const evidence = c.evidence;
   const seen = normUid(c.uidSeen);
   if (c.nickname && !a.nickname) db.prepare('UPDATE accounts SET nickname = ? WHERE platformCode = ? AND uid = ?').run(String(c.nickname), a.platformCode, a.uid);
 
@@ -100,11 +103,18 @@ async function checkOne(db, a, { runTask, notify, now, siteAdmin }) {
     return { ...row, result: 'uid-mismatch', loginState: 'unknown', uidRegistered: a.uid, uidSeen: seen, message };
   }
 
+  if (state === 'ok' && !seen) {
+    // 没读到 uid 就没法核对（pending 的也没法登记），不能写成 ok
+    const message = `登录了但没读到 uid，没法核对（登记的是 ${a.uid}），没有写成 ok`;
+    save(db, a, { loginState: 'unknown', evidence: `${message}；${evidence}`, at });
+    return { ...row, result: 'failed', loginState: 'unknown', message };
+  }
+
   let id = a.id, message = evidence;
-  if (state === 'ok' && seen && a.uid === PENDING) {
+  if (state === 'ok' && a.uid === PENDING) {
     id = migrateUid(db, a.platformCode, PENDING, seen);
     message = `登记了真实 uid ${seen}（space 改为 kinso/${a.platformCode}/${seen}）；${evidence}`;
-  } else if (state === 'ok' && !seen) message = `${evidence}；没读到 uid，没核对`;
+  }
   const cur = getAccount(db, id);
   save(db, cur, { loginState: state, evidence, at });
   if (state === 'out' && a.loginState !== 'out') {

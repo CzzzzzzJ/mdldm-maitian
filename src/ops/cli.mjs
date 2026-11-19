@@ -17,7 +17,7 @@ export const USAGE = `用法：hub ops <子命令>
   login <platformCode|账号id>                  打开登录页交给负责人扫码，交还后自动检测一次
   tokens init                                  生成写入口令到仓库根目录 .env（已有的不动，不打印口令值）
 
-login 的退出码：0 全部检测完（含 out、unknown）；2 有账号 UID 不符（硬停）；1 有 runner 失败；
+login 的退出码：0 全部检测完（含 out、unknown）；2 有账号 UID 不符（硬停）；1 有检测失败（runner 失败、结果结构不对、已登录但没读到 uid）；
   否则有跳过的账号：3 profile-needed（Ego 里没有要用的 profile）> 4 user-controlled（负责人在手动操作）> 5 busy（被别的任务占着）。
   多个账号时取最严重的：2 > 1 > 3 > 4 > 5 > 0。
 文件：ops.db 默认 data/ops.db（MAITIAN_OPS_DB 可改）；口令 .env 默认仓库根目录（MAITIAN_ENV_FILE 可改）。`;
