@@ -5,6 +5,7 @@ import { EGO_SKIP, tempSpaceName } from './helpers/ego.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const HANG_BIN = fileURLToPath(new URL('./fixtures/hang-ego-browser.mjs', import.meta.url));
 const CLI = fileURLToPath(new URL('../src/ego-runner/cli.mjs', import.meta.url));
 
 describe('parseResult（不需要 Ego Lite）', () => {
@@ -44,6 +45,18 @@ describe('runEgoTask 参数检查（不需要 Ego Lite）', () => {
   test('ego-browser 起不来是失败', async () => {
     const r = await runEgoScript('console.log(1)', { egoBin: '/nonexistent/ego-browser' });
     assert.equal(r.ok, false); assert.equal(r.reason, 'spawn-failed');
+  });
+  test('超时是失败：杀掉 CLI，返回 reason=timeout，不留子进程', async () => {
+    const t0 = Date.now();
+    // 2 秒：留够 node 冷启动的时间，让假程序先打出 pid 再被杀（300ms 时冷启动偶尔来不及）
+    const r = await runEgoScript('console.log(1)', { egoBin: HANG_BIN, timeoutMs: 2000 });
+    assert.ok(Date.now() - t0 < 6000, '超时后应很快返回');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'timeout');
+    assert.match(r.error, /超过 2000ms/);
+    const pid = Number(r.stderr.match(/hang-pid (\d+)/)?.[1]);
+    assert.ok(pid > 0, '假 ego-browser 应已启动');
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, '子进程应已被杀掉');
   });
 });
 
