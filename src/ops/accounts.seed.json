@@ -1,0 +1,12 @@
+[
+  { "platformCode": "Douyin", "platformName": "抖音", "uid": "106707338905", "nickname": null },
+  { "platformCode": "Channels", "platformName": "视频号", "uid": "pending", "nickname": null },
+  { "platformCode": "XiaoHongShu", "platformName": "小红书", "uid": "5944af205e87e701889da649", "nickname": null },
+  { "platformCode": "Bili", "platformName": "B站", "uid": "478358005", "nickname": null },
+  { "platformCode": "GongZhongHao", "platformName": "公众号", "uid": "gh_eb2c407bc687", "nickname": null },
+  { "platformCode": "Weibo", "platformName": "微博", "uid": "2272770294", "nickname": null },
+  { "platformCode": "X", "platformName": "X", "uid": "pending", "nickname": "@kinsolee79" },
+  { "platformCode": "YouTube", "platformName": "YouTube", "uid": "pending", "nickname": null },
+  { "platformCode": "Instagram", "platformName": "Instagram", "uid": "pending", "nickname": null },
+  { "platformCode": "Zhishi", "platformName": "知识站", "uid": "pending", "nickname": null }
+]

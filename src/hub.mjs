@@ -10,6 +10,8 @@
 //   hub adopt <工程目录>                         登记一期已发过的（不上传）
 //   hub metrics [id]                            采集流量并发日报
 //   hub daemon                                  常驻：到点自动取链接、提醒还没点发布的平台
+//   hub ops ...                                 运营侧账号表、登录检测、写入口令（见 hub ops help）
+import './ops/dispatch.mjs';   // 必须是第一个 import：hub ops 在加载 feishu/db/driver 之前就转走，没有 config.json 也能跑
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import crypto from 'node:crypto'; import { execFileSync, spawn } from 'node:child_process';
 import { db, NAMES, LOCKED, STATE_CN, upsertEpisode, getTask, getTasks, setTask, log, episodes, getEpisode, recentLogs, getMeta, setMeta, saveMetric, prevMetric, saveSnapshot } from './db.mjs';
 import { collectors } from './metrics.mjs';
@@ -444,6 +446,6 @@ try {
     for (const e of list) { console.log(`\n【${e.id}】${e.name}  定时 ${e.schedule || '立即'}\n${table(e.id)}`); if (args.includes('--logs')) console.log(recentLogs(e.id).map(l => `  ${l.ts.slice(11, 19)} ${l.platform} ${l.action} ${l.result}`).join('\n')); }
   } else if (cmd === 'mark') { setTask(args[1], args[2], args[3], (args[4] && !args[4].startsWith('--') ? args[4] : '人工标记'), { url: opt('--url') || undefined }); log(args[1], args[2], 'mark', args[3]); console.log(table(args[1])); }
   else if (cmd === 'notify-test') await notify('发布中控已接通 ✅');
-  else console.log('用法：hub login | doctor | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon');
+  else console.log('用法：hub login | doctor | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon | ops');
 } catch (e) { console.error('出错：' + e.message); if (!e.quiet) await notify(`❌ 发布中控出错：${e.message.slice(0, 300)}`); code = 1; }
 await drv.close(); db.close(); process.exit(code);
