@@ -29,7 +29,7 @@ for (let pn = 1; pn <= 5; pn++) {
   arcPages.push(r);
   const list = r.json?.data?.arc_audits ?? [];
   const pager = r.json?.data?.page;
-  if (!list.length || list.some((x) => x.Archive.ptime < since) || (pager && pn * pager.ps >= pager.count)) break;
+  if (!list.length || list.some((x) => x.Archive.ptime > 0 && x.Archive.ptime < since) || (pager && pn * pager.ps >= pager.count)) break;
 }
 const arcs = arcPages.flatMap((r) => r.json?.data?.arc_audits ?? []);
 
@@ -49,7 +49,7 @@ const posts = arcs.filter((x) => x.Archive.ptime >= since || x.Archive.dtime > n
     postId: a.bvid, uid: String(a.mid), platform: 'Bili', account: nav.json.data.uname,
     title: a.title, desc: a.desc, cover: a.cover,
     postType: '视频', postTypeCode: '1', publishStatus, statusText, status: String(a.state),
-    postTime: cst(a.ptime), timing: a.dtime > now ? cst(a.dtime) : null,
+    postTime: cst(a.ptime || a.dtime || a.ctime), timing: a.dtime > now ? cst(a.dtime) : null,
     url: `https://www.bilibili.com/video/${a.bvid}`,
     view: s?.view, like: s?.like, comment: s?.reply, favorite: s?.favorite, forward: s?.share, coin: s?.coin, danmu: s?.danmaku,
     fansAdd: c?.total_new_attention_cnt ?? null, fansDrop: c?.unfollow ?? null,

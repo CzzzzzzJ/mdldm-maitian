@@ -3,7 +3,7 @@
 // 外层页面挂钩抓不到，所以列表读 Vue 2 组件（元素上的 __vue__）的 props。
 // 跑：spikes/platform/run.sh spikes/platform/07-engage-channels.mjs
 // 只读：读列表；点「回复」图标/打开会话；Input.insertText 填「测试」→ 读回 → 全选+Backspace 清空 → 读回。
-// 绝不点发送、不按 Enter、不点赞。第三方昵称/uid 打码，正文只留前 6 个字。
+// 绝不点发送、不按 Enter、不点赞。第三方昵称/uid 打码，正文一律换成 <已脱敏>。
 const L = await import(`${globalThis.SPIKE_ROOT}/spikes/platform/lib.mjs`);
 const { account, openSpace, mainPage, saveRaw, sleep, anon, clip } = L;
 

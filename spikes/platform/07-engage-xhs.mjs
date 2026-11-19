@@ -5,7 +5,7 @@
 //   私信：/chat，会话列表接口 /api/im/web/v3/chats
 // 跑：spikes/platform/run.sh spikes/platform/07-engage-xhs.mjs
 // 只读：读列表；点「回复」/打开会话；Input.insertText 填「测试」→ 读回 → 全选+Backspace 清空 → 读回。
-// 绝不点发送、不按 Enter。第三方昵称/uid 打码，正文只留前 6 个字。
+// 绝不点发送、不按 Enter。第三方昵称/uid 打码，正文一律换成 <已脱敏>。
 const L = await import(`${globalThis.SPIKE_ROOT}/spikes/platform/lib.mjs`);
 const { ACCOUNTS, openSpace, mainPage, saveRaw, sleep, anon, clip, installHook, captured, keyPaths } = L;
 const A = ACCOUNTS.find((a) => a.home?.includes('xiaohongshu'));

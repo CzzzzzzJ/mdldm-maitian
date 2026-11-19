@@ -66,7 +66,7 @@ backfill.py 不读：`uid`、`desc`、`cover`、`postType`、`postTypeCode`、`s
 | B站 | `state=0` →「已发布」；`-6`、`-30` →「审核中」；`-40` →「定时发布」；其它 → `state_desc`，没有就「state=<值>」 |
 | 视频号 | 一律「已发布」（post_list 只含已发表的）；仅自己可见的另外带 `punish: true`，backfill 记「已下架」，refresh.py 仍算上线（和小V猫一致） |
 
-`postTime` 都来自发布时间字段，四个平台这次都没有 `null`。唯一会出空的情况是 **B站未发布的定时稿**：`Archive.ptime=0`，现在的 `06-works-bili.mjs` 会因 `cst(0)` 得到 `null`。S3 要改成 `ptime` 为 0 时用定时时间 `dtime`，再没有就用投稿时间 `ctime`（`timing` 照填 `dtime`）。这次账号里没有定时稿，没实测到；探针文件不在本轮修改范围，没改。
+`postTime` 都来自发布时间字段，四个平台这次都没有 `null`。唯一会出空的情况是 **B站未发布的定时稿**：`Archive.ptime=0`。`06-works-bili.mjs` 已改成 `ptime` 为 0 时用定时时间 `dtime`，再没有就用投稿时间 `ctime`（`timing` 照填 `dtime`），翻页判断也跳过 `ptime=0` 的稿件。这次账号里没有定时稿，没实测到。
 
 **`accounts-*.json` 不是 backfill.py 读的**，是 `kinso-dashboard/refresh.py` 的 `ingest_accounts` 读的：`uid`（必须和 refresh.py 里登记的一致才收）、`fans`、`updateTime`、`loginStatus`（不是「登录有效」就提示）、`daily[].date`、`daily[].fansTotal`（0 和 null 都当作没同步到）、`daily[].fansNet`。
 
