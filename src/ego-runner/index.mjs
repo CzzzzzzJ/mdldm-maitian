@@ -75,7 +75,13 @@ export function buildTaskSource({ space, profileId, params, pluginDir, script, h
   const ctx = { space, profileId, params, pluginDir, shimUrl: SHIM_URL, spaceUrl: SPACE_URL, heartbeat, deadlineAt, shimOptions: { locksDir, focusTimeoutMs } };
   return `const __ctx = ${JSON.stringify(ctx)};
 const __fs = await import("node:fs");
-const __heartbeat = (stopped) => { if (__ctx.heartbeat) __fs.writeFileSync(__ctx.heartbeat.file, JSON.stringify({ at: Date.now(), stopped })); };
+// 先写临时文件再 rename，runner 读心跳时不会读到半写的 JSON
+const __heartbeat = (stopped) => {
+  if (!__ctx.heartbeat) return;
+  const tmp = __ctx.heartbeat.file + "." + Math.random().toString(36).slice(2) + ".tmp";
+  try { __fs.writeFileSync(tmp, JSON.stringify({ at: Date.now(), stopped })); __fs.renameSync(tmp, __ctx.heartbeat.file); }
+  catch (e) { try { __fs.rmSync(tmp, { force: true }); } catch {} throw e; }
+};
 let __beat = null, __deadline = null;
 const __stop = () => {
   clearInterval(__beat); clearTimeout(__deadline);
@@ -118,6 +124,7 @@ async function withSpaceLock(space, { lock, locksDir, staleMs, graceMs }, run) {
   const got = tryLock(spaceLockPath(locksDir, space), { staleMs, meta: { space } });
   if (!got.ok) {
     const h = got.holder;
+    if (h?.corrupt) return { ok: false, reason: 'busy', error: `space ${space} 的锁文件 ${h.path} 内容损坏，不能接管；确认没有任务在跑后手动删掉它`, holder: { corrupt: true, path: h.path } };
     const who = h?.pid ? `进程 ${h.pid}` : 'Ego 里超时后还没停的旧脚本';
     return { ok: false, reason: 'busy', error: `space ${space} 正被${who}占用${h ? `（开始于 ${new Date(h.startedAt).toISOString()}）` : ''}`, holder: holderInfo(h) };
   }
