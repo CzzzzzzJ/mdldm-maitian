@@ -1,0 +1,215 @@
+{
+  "note": "抖音 work_list + dashboard/fans 的脱敏样例。raw 只留 1 条、URL 去掉查询串；mapped 是按目标格式（vcat posts/accounts）映射后的结果",
+  "request": {
+    "list": "/janus/douyin/creator/pc/work_list?status=0&count=30&max_cursor=<max_cursor>&scene=star_atlas&device_platform=android&aid=1128",
+    "fans": "/janus/douyin/creator/data/overview/dashboard/fans?recent_days=30",
+    "user": "/web/api/media/user/info/"
+  },
+  "raw": {
+    "work_list": {
+      "status_code": 0,
+      "total": 88,
+      "has_more": true,
+      "max_cursor": 1748682823000,
+      "aweme_list": [
+        {
+          "aweme_id": "7510302804091669771",
+          "item_title": "我要去世了豆包",
+          "desc": "我要去世了豆包 #AI #DeepSeek #ChatGPT #心理咨询",
+          "create_time": 1748629314,
+          "aweme_type": 4,
+          "duration": 78624,
+          "status_value": 102,
+          "status": {
+            "allow_comment": true,
+            "allow_share": true,
+            "aweme_id": "7510302804091669771",
+            "in_reviewing": false,
+            "is_delete": false,
+            "is_private": false,
+            "is_prohibited": false,
+            "private_status": 0,
+            "reviewed": false,
+            "self_see": false,
+            "with_fusion_goods": false,
+            "with_goods": false
+          },
+          "statistics": {
+            "aweme_id": "7510302804091669771",
+            "collect_count": 371,
+            "comment_count": 43,
+            "digg_count": 515,
+            "forward_count": 0,
+            "live_watch_count": 0,
+            "play_count": 78369,
+            "share_count": 21
+          },
+          "video": {
+            "cover": {
+              "uri": "tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938",
+              "url_list": [
+                "https://p26-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
+              ]
+            }
+          }
+        }
+      ],
+      "items": [
+        {
+          "collaborative": false,
+          "cover": {
+            "uri": "tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938",
+            "url_list": [
+              "https://p26-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
+            ]
+          },
+          "create_time": 1748629314,
+          "description": "我要去世了豆包 #AI #DeepSeek #ChatGPT #心理咨询",
+          "downloadable": false,
+          "id": "7510302804091669771",
+          "metrics": {
+            "avg_view_proportion": "0.176089",
+            "avg_view_second": "13.844842",
+            "bounce_rate_2s": "0.268346",
+            "comment_count": "43",
+            "comment_rate": "0.000549",
+            "completion_rate": "0.012946",
+            "completion_rate_5s": "0.541836",
+            "cover_show": "0",
+            "danmaku_count": "1",
+            "dislike_count": "1",
+            "dislike_rate": "0.000013",
+            "download_count": "0",
+            "fan_view_proportion": "0.002840",
+            "favorite_count": "371",
+            "favorite_rate": "0.004734",
+            "homepage_visit_count": "36",
+            "like_count": "515",
+            "like_rate": "0.006571",
+            "share_count": "21",
+            "share_rate": "0.000268",
+            "subscribe_count": "5",
+            "subscribe_rate": "0.000064",
+            "unsubscribe_count": "0",
+            "unsubscribe_rate": "0.000000",
+            "view_count": "78369"
+          },
+          "metrics_offline_update_time": 1756396800,
+          "review": {
+            "status": 2
+          },
+          "type": 3,
+          "user_id": 106707338905,
+          "video_info": {
+            "duration": 78624,
+            "is_vr": false
+          },
+          "visibility": {}
+        }
+      ]
+    },
+    "fans": {
+      "metrics": [
+        {
+          "english_metric_name": "net_fans_cnt",
+          "metric_name": "净增粉丝",
+          "metric_value": 130,
+          "trends": [
+            {
+              "date_time": "20261020",
+              "value": 0
+            }
+          ]
+        }
+      ],
+      "status_code": 0,
+      "status_msg": ""
+    }
+  },
+  "mapped": {
+    "posts": [
+      {
+        "postId": "7708984451971452170",
+        "uid": "106707338905",
+        "platform": "Douyin",
+        "account": "Kinso Lee",
+        "title": "Claude又送了一张重置卡，昨天开的新号结果出来了",
+        "desc": "Claude又送了一张重置卡，昨天开的新号结果出来了 一睡醒，Claude 又给我发了一张重置卡。昨天说的那个新号我也去搞了，结果跟我想的不太一样，后面再给大家验证一下。说个题外话，它这么一直送，你这个 Codex 还有什么优势？ #claude #ai工具 #ai编程 #chatgpt #claudeultra",
+        "cover": "https://p11-sign.douyinpic.com/tos-cn-i-dy/780b81ddd1b94a15b9cb47763ec00714~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "published",
+        "statusText": "已发布",
+        "status": "102",
+        "postTime": "2026-11-17 11:56:57",
+        "timing": null,
+        "url": "https://www.douyin.com/video/7708984451971452170",
+        "view": 5126,
+        "like": 31,
+        "comment": 14,
+        "favorite": 10,
+        "forward": 0,
+        "share": 0,
+        "fansAdd": 2,
+        "fansDrop": 0,
+        "homeVisit": 146,
+        "fullView": 4.7994,
+        "view2s": 28.1939,
+        "view5s": 46.4425,
+        "viewTime": 14.040944,
+        "fansViewRate": 0.9559,
+        "platformName": "抖音"
+      },
+      {
+        "postId": "7708831891893341466",
+        "uid": "106707338905",
+        "platform": "Douyin",
+        "account": "Kinso Lee",
+        "title": "Grok Bot怎么用？零基础搭AI员工团队，关机也干活",
+        "desc": "Grok Bot怎么用？零基础搭AI员工团队，关机也干活 凌晨一点你在睡觉，你的 AI 团队还在干活。我用下来有三点感受，第三点很多人是开通了才知道。 #ai智能体 #ai员工 #ai助手 #ai员工搭建 #马斯克ai",
+        "cover": "https://p26-sign.douyinpic.com/tos-cn-i-dy/be097613e54640a998238667ae3b97ac~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "unknown",
+        "statusText": "状态未知",
+        "status": "144",
+        "postTime": "2026-11-17 02:05:01",
+        "timing": null,
+        "url": "https://www.douyin.com/video/7708831891893341466",
+        "view": 0,
+        "like": 0,
+        "comment": 0,
+        "favorite": 0,
+        "forward": 0,
+        "share": 0,
+        "fansAdd": 0,
+        "fansDrop": 0,
+        "homeVisit": 0,
+        "fullView": 0,
+        "view2s": 0,
+        "view5s": 0,
+        "viewTime": 0,
+        "fansViewRate": 0,
+        "platformName": "抖音"
+      }
+    ],
+    "account": {
+      "uid": "106707338905",
+      "loginStatus": "登录有效",
+      "fans": 295,
+      "updateTime": "2026-11-19 14:25:49",
+      "daily": [
+        {
+          "date": "2026-11-17",
+          "fansTotal": 290,
+          "fansNet": 8
+        },
+        {
+          "date": "2026-11-18",
+          "fansTotal": 294,
+          "fansNet": 4
+        }
+      ]
+    }
+  }
+}

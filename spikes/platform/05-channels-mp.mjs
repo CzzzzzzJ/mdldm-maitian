@@ -6,7 +6,8 @@
 //     缩短间隔：'{"waitMin":1}'
 const L = await import(`${globalThis.SPIKE_ROOT}/spikes/platform/lib.mjs`);
 const { account, openSpace, mainPage, getJson, saveRaw, sleep } = L;
-const args = { waitMin: 10, takeOver: false, ...(globalThis.ARGS ?? {}) };
+// minutes>0 时改跑长时间线：每 everySec 秒一轮，两边交替刷新页面、读接口，直到满 minutes 分钟（2026-11-19 用 35 分钟）
+const args = { waitMin: 10, minutes: 0, everySec: 180, takeOver: false, ...(globalThis.ARGS ?? {}) };
 
 const ch = await openSpace(account('Channels'), { takeOver: args.takeOver });
 const mp = await openSpace(account('GongZhongHao'), { takeOver: args.takeOver });
@@ -17,8 +18,8 @@ if (!ch.task || !mp.task) {
 const chPage = await mainPage(ch.task);
 const mpPage = await mainPage(mp.task);
 
-async function readChannels() {
-  if (!/channels\.weixin\.qq\.com\/platform/.test(await chPage.url())) {
+async function readChannels(reload = false) {
+  if (reload || !/channels\.weixin\.qq\.com\/platform/.test(await chPage.url())) {
     await chPage.goto('https://channels.weixin.qq.com/platform', { waitUntil: 'commit', timeout: 30000 });
     await sleep(6000);
   }
@@ -55,7 +56,20 @@ await sleep(2000);
 timeline.push({ step: '3 视频号（打开公众号后）', ...(await readChannels()) });
 
 const bothIn = timeline[0].loggedIn && timeline[1].loggedIn;
-if (bothIn) {
+const t0 = Date.now();
+const mins = () => Math.round((Date.now() - t0) / 6000) / 10;
+if (bothIn && args.minutes > 0) {
+  // 奇数轮刷新视频号、只读公众号接口；偶数轮反过来。每轮都打一行，后台跑时能 tail 看进度
+  for (let i = 1; Date.now() - t0 < args.minutes * 60_000; i++) {
+    await sleep(args.everySec * 1000);
+    const c = await readChannels(i % 2 === 1);
+    timeline.push({ step: `r${i} 视频号${i % 2 === 1 ? '（刷新）' : ''}`, min: mins(), ...c });
+    await sleep(2000);
+    const m = await readMp(i % 2 === 0);
+    timeline.push({ step: `r${i} 公众号${i % 2 === 0 ? '（重开首页）' : ''}`, min: mins(), ...m });
+    console.log(JSON.stringify({ round: i, min: mins(), ch: c.loggedIn, mp: m.loggedIn }));
+  }
+} else if (bothIn) {
   await sleep(args.waitMin * 60_000);
   timeline.push({ step: `4 视频号（+${args.waitMin}min）`, ...(await readChannels()) });
   await sleep(2000);
