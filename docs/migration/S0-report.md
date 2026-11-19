@@ -18,7 +18,7 @@
 | ⑧ | 一个进程跑 2 小时以上（12） | 通过 | 126 分钟 126/126 次检查成功，RSS 稳定约 177MB | [08-long-process.md](../../spikes/results/08-long-process.md) |
 | ⑬ | `Input.dispatchMouseEvent/KeyEvent`（13） | 通过 | 前台页、后台页、别的 space 的页都能点、能输入；鼠标事件会抢焦点 | [13-input-events.md](../../spikes/results/13-input-events.md) |
 
-交付件：`src/ego-shim.mjs`（`chrome.tabs.*` / `chrome.debugger.*` → Ego task/page API）、`src/ego-runner/`（短进程运行器，最后一行 `@@RESULT <json>`）、`test/ego-shim.test.mjs`、`test/ego-runner.test.mjs`（对本地测试页的行为测试，`npm test` 25/25 通过）。插件 fork `kinsolee/mdldm-maitian-publisher` 已建、upstream 已配（11-18）；麦田 fork 已有 upstream。
+交付件：`src/ego-shim.mjs`（`chrome.tabs.*` / `chrome.debugger.*` → Ego task/page API）、`src/ego-runner/`（短进程运行器，最后一行 `@@RESULT <json>`）、`test/ego-shim.test.mjs`、`test/ego-runner.test.mjs`（对本地测试页的行为测试，`npm test` 39/39 通过）。插件 fork `kinsolee/mdldm-maitian-publisher` 已建、upstream 已配（11-18）；麦田 fork 已有 upstream。
 
 ## ⑥ 给 S3 的要点（最急）
 
@@ -40,7 +40,7 @@
 3. **前台锁（§2.3）**：全局一把，跨 space、跨进程，锁住所有会切前台的步骤：`withFocus` 整段、`tabs.create/update({active:true})`；插件的 `cdp.click/hover` 发真实鼠标事件也会抢焦点，同样进锁或接受抢焦点。串行代价小（20 轮从约 30 秒变约 50 秒）。
 4. **space 锁由 runner 保证**：Ego 不拦两个进程同时操作同一页。普通模式下超时杀 CLI 后脚本可能还在跑，所以 runner 超时后要等心跳确认旧脚本停了，才对同一 space 起新任务；脚本自己设截止时间，浏览器调用出错就退出，不吞错。
 5. **长任务用普通模式**：`--session` 的 `--timeout-ms` 上限 10 分钟，只适合登录检测、填表、回读这类短任务；长视频上传用普通模式加心跳文件。
-6. **ego-shim 的 `tabs.create`**：`src/ego-shim.mjs` 的 `page.goto(url)` 默认等 `load`、15 秒超时，抖音这类长轮询 SPA 可能超时（11-18 出现过，11-19 没复现）。S2 改成 `waitUntil: "commit"` 加等待，或放宽超时。
+6. **ego-shim 的 `tabs.create`**：`src/ego-shim.mjs` 的 `tabs.create` 里 `page.goto(url)` 默认等 `load`、15 秒超时，抖音这类长轮询 SPA 可能超时（11-18 出现过，11-19 没复现）。S2 改成 `waitUntil: "commit"` 加等待，或放宽超时。
 7. **preflight 未登录判断**：插件的 `LOGIN_URL` 正则不认 Instagram 的账号验证页（`/auth_platform/challengepicker/`），未登录要等满 60 秒超时，且原因分不清是没登录还是网慢。S2 在 fork 里补这条正则。
 8. **⑦ 评论私信**：优先读页面组件数据或挂钩到的接口；小红书评论列表 DOM 渲染不稳，以接口为准；小红书创作者中心没有私信页，评论和私信都在主站。「是否已回复」的判断留给 S5 再补。
 
