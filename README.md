@@ -182,7 +182,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 
 1. 发布 skill 会在 B站、YouTube、X 的链接上带 `utm_campaign=<主题>-<序号>`；你的站点记下访客第一次带来的这个参数，注册和下单时一起存。
 2. 站点提供两个只读接口给麦田（用专用 Chrome 里的管理员登录态去调），字段见 [`src/site.mjs`](src/site.mjs) 顶部注释。
-3. 在 `config.site` 里填站点地址和接口路径。
+3. 在 `config.site` 里填站点地址和接口路径。也可以直接在网页「系统 → 集成」里编辑、点「测试连接」，保存即生效（不用重启守护进程）。
 
 作者用自己的课程站做了示例；你的站结构不同，改 `src/site.mjs` 和转化页即可。
 
@@ -194,7 +194,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 `scripts/install-launchd.sh --tunnel` 会装一个 cloudflared 隧道，地址推到飞书。
 
 - **固定域名（推荐）**：域名交给 Cloudflare 后，跑 `cloudflared tunnel login`、`cloudflared tunnel create maitian`、`cloudflared tunnel route dns maitian maitian.你的域名`，在 `config.json` 里加 `"tunnel": { "name": "maitian", "hostname": "maitian.你的域名" }`。地址永远不变，建议再在 Cloudflare Zero Trust 里给它加一层邮箱验证码登录（Access → Self-hosted 应用），然后在 `config.json` 的 `web.access` 填团队域名和应用的 AUD Tag：麦田会验证 Access 签发的登录凭证，手机上输邮箱收验证码就能进，不用再带 `?key=`。
-- **飞书验证码登录（推荐，零配置）**：`config.json` 的 `web` 里加 `"login": "feishu"`。远程打开麦田会先到登录页，点「发送验证码」，6 位码推到飞书群，输入后这台设备记住 30 天；验证码 5 分钟有效、只能用一次、错 5 次作废，60 秒内只能发一次。`?key=` 口令仍可用作备用。
+- **飞书验证码登录（推荐，零配置）**：`config.json` 的 `web` 里加 `"login": "feishu"`。远程打开麦田会先到登录页，点「发送验证码」，6 位码推到飞书群，输入后这台设备记住 30 天；验证码 5 分钟有效、只能用一次、错 5 次作废，60 秒内只能发一次。`?key=` 口令仍可用作备用。飞书 webhook 和这个开关也能在网页「系统 → 集成」里编辑、点「测试发送」，保存即生效。
 - **快速隧道（默认）**：不配 `tunnel` 时用 `https://xxx.trycloudflare.com`，不用账号，但每次重启地址都会变。
 
 </details>
