@@ -198,7 +198,11 @@ async function handle(req, res) {
     try {
       applySitePatch(config, { enabled: a.enabled === undefined ? undefined : a.enabled === true, name: a.name, base: a.base, adminPath: a.adminPath, coursesApi: a.coursesApi, dashboardApi: a.dashboardApi, coursePath: a.coursePath, logo: a.logo });
       saveConfig(config);
-    } catch (e) { rollbackConfig(backup); return send(res, 500, { error: '写配置失败：' + e.message }); }
+    } catch (e) {
+      rollbackConfig(backup);
+      const msg = e.message || '';
+      return send(res, /先填站点地址/.test(msg) ? 400 : 500, { error: /先填站点地址/.test(msg) ? msg : ('写配置失败：' + msg) });
+    }
     refreshSite();
     return send(res, 200, { site: integrations().site });
   }

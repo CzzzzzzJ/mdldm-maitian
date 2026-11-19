@@ -163,23 +163,44 @@ const siteState = (s) => {
   const hm = String(t.ts || '').slice(11, 16);
   return t.ok ? `<span class="istate ok">✓ 已连接${hm ? ` · 上次测试 ${hm}` : ''}${sum}</span>` : `<span class="istate bad">✗ ${esc(t.error || '测试失败')}</span>`;
 };
+// 测试连接会等专用 Chrome，期间 load/render 可能重绘；草稿保住输入，避免表单被清空
+let siteDraft = null, fsDraft = null;
+function captureSiteDraft() {
+  if (!$('#site-name')) return;
+  siteDraft = {
+    name: $('#site-name').value, base: $('#site-base').value,
+    adminPath: $('#site-adminPath')?.value, coursesApi: $('#site-coursesApi')?.value,
+    dashboardApi: $('#site-dashboardApi')?.value, coursePath: $('#site-coursePath')?.value,
+    logo: $('#site-logo')?.value ?? '',
+  };
+}
+function captureFsDraft() { const el = $('#fs-webhook'); if (el) fsDraft = el.value; }
+const siteVals = () => { const s = itg().site, d = siteDraft || {}; return {
+  name: d.name ?? s.name ?? '', base: d.base ?? s.base ?? '', adminPath: d.adminPath ?? s.adminPath ?? '',
+  coursesApi: d.coursesApi ?? s.coursesApi ?? '', dashboardApi: d.dashboardApi ?? s.dashboardApi ?? '',
+  coursePath: d.coursePath ?? s.coursePath ?? '', logo: d.logo ?? s.logo ?? '',
+}; };
 const siteBody = () => {
-  const s = itg().site;
-  if (!s.enabled) return '<div class="empty" style="height:60px">未启用 · 打开后填写站点配置；停用期间转化页、建课和站点数据同步都会关闭。</div>';
+  const s = itg().site, v = siteVals();
+  if (!s.enabled) return '<div class="site-off">未启用 · 打开后填写站点配置；停用期间转化页、建课和站点数据同步都会关闭。</div>';
   const field = (id, lab, val) => `<label class="lab" for="${id}">${lab}</label><input class="inp" id="${id}" value="${esc(val || '')}">`;
   return `<div class="istate" id="site-state">${siteState(s)}</div>
-  ${field('site-name', '站名', s.name)}${field('site-base', '站点地址', s.base)}
+  ${field('site-name', '站名', v.name)}${field('site-base', '站点地址', v.base)}
   <details><summary>接口路径（默认值一般不用改）</summary><div class="grid2" style="margin-top:10px">
-    ${field('site-adminPath', '后台路径', s.adminPath)}${field('site-coursesApi', '课程接口', s.coursesApi)}${field('site-dashboardApi', '仪表盘接口', s.dashboardApi)}${field('site-coursePath', '课程页路径', s.coursePath)}
+    ${field('site-adminPath', '后台路径', v.adminPath)}${field('site-coursesApi', '课程接口', v.coursesApi)}${field('site-dashboardApi', '仪表盘接口', v.dashboardApi)}${field('site-coursePath', '课程页路径', v.coursePath)}
   </div></details>
-  ${field('site-logo', '站点图标（本机路径，可选）', s.logo)}
-  <div class="btns"><button class="btn pri" data-site="test">测试连接</button><button class="btn" data-site="save">保存</button></div>
+  ${field('site-logo', '站点图标（本机路径，可选）', v.logo)}
+  <div class="btns"><button type="button" class="btn pri" data-site="test">测试连接</button><button type="button" class="btn" data-site="save">保存</button></div>
   <div class="fine">保存后立即生效，不用重启</div>`;
 };
-function paintFs() { const el = $('#fs-state'); if (el) el.innerHTML = fsState(itg().feishu); const cb = $('#fs-login'); if (cb) { cb.checked = !!itg().feishu.login; cb.disabled = !itg().feishu.webhook; } }
+function paintFs() {
+  const el = $('#fs-state'); if (el) el.innerHTML = fsState(itg().feishu);
+  const wh = $('#fs-webhook'); if (wh && fsDraft != null) wh.value = fsDraft;
+  const cb = $('#fs-login'); if (cb) { cb.checked = !!itg().feishu.login; cb.disabled = !itg().feishu.webhook; }
+}
 function paintSiteBody() { const el = $('#site-body'); if (el) el.innerHTML = siteBody(); const on = $('#site-on'); if (on) on.checked = !!itg().site.enabled; }
-// 停用态表单没渲染，输入框不存在时回退到已保存的值，避免「关掉再打开」把配置清空
-const siteFields = () => { const s = itg().site; return { enabled: $('#site-on').checked, name: $('#site-name')?.value ?? s.name ?? '', base: $('#site-base')?.value ?? s.base ?? '', adminPath: $('#site-adminPath')?.value ?? s.adminPath ?? '', coursesApi: $('#site-coursesApi')?.value ?? s.coursesApi ?? '', dashboardApi: $('#site-dashboardApi')?.value ?? s.dashboardApi ?? '', coursePath: $('#site-coursePath')?.value ?? s.coursePath ?? '', logo: $('#site-logo')?.value ?? s.logo ?? '' }; };
+// 停用态表单没渲染，输入框不存在时回退到草稿 / 已保存的值，避免「关掉再打开」或测试后把配置清空
+const siteFields = () => { captureSiteDraft(); const s = itg().site, v = siteVals(); return { enabled: $('#site-on')?.checked ?? !!s.enabled, ...v }; };
 
 function vSystem() {
   const h = O.health, today = new Date().toLocaleDateString('zh-CN'), cur = O.episodes[0], ps = h.platforms || [];
@@ -190,12 +211,12 @@ function vSystem() {
   <div class="panel"><div class="btns" style="margin-bottom:4px">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}${abtn({ type: 'board' }, '同步知识站数据')}</div>
     ${ps.map(p => { const [c, i, t] = stOf(p); return `<div class="prow pl-row${p.disabled ? ' off' : ''}">${logo(p.id)}<span class="n" style="width:auto;margin-right:auto">${PN[p.id]}<span class="pl-sub">${p.disabled ? '不体检、不发布、不采粉丝' : p.reason || (p.day ? `上次检查 ${esc(p.day)}` : '还没检查过')}</span></span><span class="st-chip ${c}"><i>${i}</i>${t}</span>${p.disabled ? '' : abtn({ type: 'doctor', platform: p.id }, '检查')}${p.disabled ? '' : abtn({ type: 'login', platform: p.id }, p.state === 'ok' ? '打开后台' : '去登录', 'pl-login')}${abtn({ type: 'toggle-platform', platform: p.id, on: p.disabled }, p.disabled ? '启用' : '停用', '', p.disabled ? '' : `停用${PN[p.id]}？停用后不再体检、发布和采粉丝`)}</div>`; }).join('') || '<div class="empty" style="height:50px">没有平台</div>'}</div>
   ${sec('集成', '飞书通知与自己的知识站')}
-  <div class="sys-2col">
+  <div class="sys-2col sys-itg">
     <div class="panel">
       <div class="ph"><h3>飞书</h3><span class="note" id="fs-state">${fsState(itg().feishu)}</span></div>
       <label class="lab" for="fs-webhook">群机器人 webhook</label>
       <input class="inp" id="fs-webhook" type="text" value="${esc(itg().feishu.webhook || '')}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
-      <div class="btns"><button class="btn pri" data-fs="test">测试发送</button><button class="btn" data-fs="save">保存</button></div>
+      <div class="btns"><button type="button" class="btn pri" data-fs="test">测试发送</button><button type="button" class="btn" data-fs="save">保存</button></div>
       <label class="swrow"><input type="checkbox" class="switch" id="fs-login" ${itg().feishu.login ? 'checked' : ''} ${itg().feishu.webhook ? '' : 'disabled'}><span>用飞书验证码登录 <small>远程打开时推 6 位验证码，替代网页口令</small></span></label>
       <div class="fine">保存后立即生效，不用重启</div>
     </div>
@@ -217,12 +238,14 @@ function vSystem() {
 }
 
 async function render() {
+  captureSiteDraft(); captureFsDraft();
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
   let body; try { body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)(); } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
   app.innerHTML = topbar(O, key) + body; after();
+  if (fsDraft != null) { const wh = $('#fs-webhook'); if (wh) wh.value = fsDraft; }
 }
 async function load() {
-  try { O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
+  try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
   catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
@@ -245,14 +268,24 @@ document.addEventListener('click', async (e) => {
   const stb = e.target.closest('[data-site]');
   if (stb) {
     const kind = stb.dataset.site; stb.disabled = true;
+    const fields = siteFields();
     if (kind === 'test') {
-      const r = await fetch('/api/integrations/site/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(siteFields()) }), j = await r.json().catch(() => ({}));
+      if (!String(fields.base || '').trim()) { toast('先填站点地址'); stb.disabled = false; return; }
+      const r = await fetch('/api/integrations/site/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(fields) }), j = await r.json().catch(() => ({}));
+      // 无论成败都保留表单：只改状态文案，不重绘输入框
       if (!r.ok) toast(j.error || '没成功');
-      else { I.site = { ...itg().site, lastTest: { ...j, ts: new Date().toISOString() } }; const el = $('#site-state'); if (el) el.innerHTML = siteState(I.site); toast(j.ok ? '连接正常' : (j.error || '连不上')); }
+      else {
+        I.site = { ...itg().site, lastTest: { ok: !!j.ok, error: j.error || '', ts: new Date().toISOString() }, ...(j.summary ? { summary: j.summary } : {}) };
+        // 表单还在就只改状态；若测试期间被 load/render 冲掉，用草稿重绘，绝不丢输入
+        if ($('#site-name')) { const el = $('#site-state'); if (el) el.innerHTML = siteState(I.site); }
+        else paintSiteBody();
+        toast(j.ok ? '连接正常' : (j.error || '连不上'));
+      }
     } else {
-      const r = await fetch('/api/integrations/site', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(siteFields()) }), j = await r.json().catch(() => ({}));
+      if (fields.enabled && !String(fields.base || '').trim()) { toast('先填站点地址再启用'); stb.disabled = false; return; }
+      const r = await fetch('/api/integrations/site', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(fields) }), j = await r.json().catch(() => ({}));
       toast(r.ok ? '已保存' : (j.error || '没成功'));
-      if (r.ok) { I.site = j.site; paintSiteBody(); }
+      if (r.ok) { siteDraft = null; I.site = j.site; paintSiteBody(); }
     }
     stb.disabled = false; return;
   }
@@ -275,9 +308,18 @@ document.addEventListener('change', async (e) => {
     return;
   }
   if (e.target.id !== 'site-on' || !I) return;
-  const r = await fetch('/api/integrations/site', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(siteFields()) }), j = await r.json().catch(() => ({}));
+  const wantOn = e.target.checked;
+  // 打开开关但还没地址：只展开表单，不落盘；填好地址后点「保存」才真正启用
+  if (wantOn && !String(siteFields().base || '').trim()) {
+    I.site = { ...itg().site, enabled: true };
+    paintSiteBody();
+    toast('先填站点地址再保存启用');
+    return;
+  }
+  const fields = siteFields();
+  const r = await fetch('/api/integrations/site', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(fields) }), j = await r.json().catch(() => ({}));
   if (r.ok) { I.site = j.site; paintSiteBody(); toast(j.site.enabled ? '已启用' : '已停用'); }
-  else { toast(j.error || '没成功'); paintSiteBody(); }
+  else { toast(j.error || '没成功'); e.target.checked = !!itg().site.enabled; paintSiteBody(); }
 });
 addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
 addEventListener('resize', () => after());

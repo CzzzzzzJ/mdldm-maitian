@@ -92,10 +92,11 @@ body.kiosk{cursor:none}body.kiosk .nav{display:none}body.kiosk .screen{zoom:1.12
 .h1{font:600 32px/1.2 -apple-system,"SF Pro Display","PingFang SC",sans-serif;letter-spacing:-.02em;margin:6px 2px 4px}.lead{color:var(--t2);margin:0 2px 20px;font-size:14px}
 .sec{margin:28px 2px 12px;display:flex;align-items:baseline;gap:10px}.sec h2{margin:0;font-size:18px;font-weight:600}.sec .note{margin-left:auto;font-size:12px;color:var(--t3)}.sec .note a{color:var(--accent)}
 .grid{display:grid;gap:var(--gap)}
-/* 自动任务 / 最近动态：宽屏两列，同高，超出滚动；与上方平台卡保持同款间距 */
-.sys-2col{display:grid;grid-template-columns:1fr;gap:var(--gap);align-items:stretch;margin-top:var(--gap)}
+/* 系统页两列：集成卡随内容增高；自动任务 / 最近动态同高滚动 */
+.sys-2col{display:grid;grid-template-columns:1fr;gap:var(--gap);align-items:start;margin-top:var(--gap)}
 @media(min-width:768px){.sys-2col{grid-template-columns:1fr 1fr}}
-.sys-2col .panel{height:100%;min-height:227px;max-height:360px;overflow:hidden}
+.sys-2col .panel{min-width:0}
+.sys-2col .sys-tasks,.sys-2col .sys-feed{height:100%;min-height:227px;max-height:360px;overflow:hidden;align-self:stretch}
 .sys-scroll{flex:1;min-height:0;overflow:auto;padding-right:4px}
 .sys-scroll::-webkit-scrollbar{width:6px}
 .sys-scroll::-webkit-scrollbar-thumb{background:rgba(0,0,0,.15);border-radius:3px}
@@ -156,10 +157,15 @@ summary .lg{--s:24px}summary b{width:70px;font-weight:600;flex:none}summary span
 .pl-row.off{opacity:.72}.st-chip.planned i{background:transparent;color:var(--t3)}
 .fnl{display:block;height:4px;border-radius:2px;background:var(--bg);margin-top:4px}.fnl i{display:block;height:100%;border-radius:2px}
 
-/* 集成卡片（飞书 / 知识站） */
+/* 集成卡片（飞书 / 知识站）：两卡同高；按钮与输入框留出间距 */
+.sys-2col.sys-itg{align-items:stretch}
+.sys-2col.sys-itg .panel{height:100%}
+#site-body{flex:1;display:flex;flex-direction:column;min-height:0}
+.site-off{flex:1;display:flex;align-items:center;color:var(--t3);font-size:13px;line-height:1.55;padding:4px 0 8px}
 .inp{width:100%;font:inherit;font-size:13.5px;padding:9px 12px;border:1px solid var(--line2);border-radius:12px;background:#fff;outline:none}
 .inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,113,227,.12)}
 .lab{display:block;font-size:12px;color:var(--t2);margin:10px 0 5px}
+.sys-2col .btns{margin-top:14px}
 .swrow{display:flex;align-items:center;gap:10px;font-size:13.5px;margin-top:14px;cursor:pointer}
 .swrow small{color:var(--t3);font-size:12px}
 .swrow.alone{margin:0 0 0 auto;cursor:default}

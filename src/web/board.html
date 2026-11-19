@@ -105,8 +105,10 @@ function insights(cur, ref) {
     if (byF && byF.f > 0) add('', '收藏', `<b>${PN[byF.p]}</b>每 100 次播放有 <b>${(byF.f * 100).toFixed(1)}</b> 个收藏，是各平台里最把这期当干货存的。`);
   }
   // 6 渠道付费
-  const ch = O.site.channels.filter(c => ['bilibili', 'douyin', 'xiaohongshu', 'twitter', 'youtube'].includes(c.source) && c.reg >= 50).map(c => ({ ...c, r: c.vip / c.reg })).sort((a, b) => b.r - a.r);
-  if (ch.length >= 2) { const a = ch[0], z = ch[ch.length - 1]; add('k4', '转化', `知识站里，来自<b>${esc(a.label)}</b>的注册有 <b>${(a.r * 100).toFixed(1)}%</b> 成了会员；${esc(z.label)} 带来 ${fmt(z.reg)} 个注册，只有 ${(z.r * 100).toFixed(1)}%。`); }
+  if (O.siteOn) {
+    const ch = (O.site.channels || []).filter(c => ['bilibili', 'douyin', 'xiaohongshu', 'twitter', 'youtube'].includes(c.source) && c.reg >= 50).map(c => ({ ...c, r: c.vip / c.reg })).sort((a, b) => b.r - a.r);
+    if (ch.length >= 2) { const a = ch[0], z = ch[ch.length - 1]; add('k4', '转化', `知识站里，来自<b>${esc(a.label)}</b>的注册有 <b>${(a.r * 100).toFixed(1)}%</b> 成了会员；${esc(z.label)} 带来 ${fmt(z.reg)} 个注册，只有 ${(z.r * 100).toFixed(1)}%。`); }
+  }
   return out.slice(0, 6).join('') || '<div class="empty">数据还不够，过两天这里会有结论</div>';
 }
 
@@ -148,9 +150,10 @@ function loginLight(h) {
 }
 function render() {
   const eps = O.episodes, days = O.site.days, h = O.health, now = Date.now();
-  // 停用的平台不在大屏显示（系统页关掉的那几家）
+  // 停用的平台、未启用的知识站都不在大屏显示
   const off = new Set((h.platforms || []).filter(p => p.disabled).map(p => p.id));
-  PL = PL_ALL.filter(p => !off.has(p)); FANP = FANP_ALL.filter(p => !off.has(p));
+  PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); FANP = FANP_ALL.filter(p => !off.has(p));
+  if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; }
   F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total;
   // 大卡轮播：没全部发完的期 + 48 小时内刚发的期，按发布时间排；默认停在「最近刚发的」，没有就停在「最快要发的」
   const at = (e) => e.schedule ? Date.parse(e.schedule) : Date.parse(e.createdAt);
@@ -221,7 +224,7 @@ function tick() {
   }
 }
 async function load() {
-  try { const r = await fetch('/api/overview'); if (!r.ok) throw new Error(r.status); O = await r.json(); if (!O.siteOn) PL = PL.filter(p => p !== 'zsz'); else { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } render(); }
+  try { const r = await fetch('/api/overview'); if (!r.ok) throw new Error(r.status); O = await r.json(); render(); }
   catch (e) { if (!O) $('#screen').innerHTML = `<div class="empty">连不上麦田服务（${esc(e.message)}）</div>`; else console.error(e); }
 }
 const tip = $('#tip');

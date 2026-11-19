@@ -27,6 +27,8 @@ export function applySitePatch(config, p = {}) {
     coursePath: pick('coursePath', SITE_DEFAULTS.coursePath),
     logo: pick('logo', SITE_DEFAULTS.logo),
   };
+  // 启用时必须有站点地址；停用可以空着
+  if (site.enabled && !String(site.base || '').trim()) throw new Error('先填站点地址再启用');
   config.site = site;
   return site;
 }

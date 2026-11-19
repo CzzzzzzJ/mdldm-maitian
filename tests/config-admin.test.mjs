@@ -30,6 +30,14 @@ test('知识站 patch 写 enabled 并保留字段', () => {
   assert.equal(config.site.enabled, false);
 });
 
+test('知识站启用时必须有站点地址', () => {
+  assert.throws(() => mod.applySitePatch(config, { enabled: true, base: '' }), /先填站点地址/);
+  // 停用可以空着
+  const s = mod.applySitePatch(config, { enabled: false, base: '' });
+  assert.equal(s.enabled, false);
+  assert.equal(s.base, '');
+});
+
 test('saveConfig 备份并可回滚', () => {
   const before = fs.readFileSync(process.env.MAITIAN_CONFIG, 'utf8');
   mod.saveConfig(config);
