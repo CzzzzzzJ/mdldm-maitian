@@ -4,10 +4,11 @@ import assert from 'node:assert/strict';
 import { openSpace, FORBIDDEN_PROFILE } from '../src/ego-runner/space.mjs';
 
 const NAME = 'kinso/test/demo';
-function fakeEgo(spaces) {
+function fakeEgo(spaces, profileIds = ['Profile 5']) {
   const calls = [];
   return {
     calls,
+    profiles: async () => profileIds.map((id) => ({ id })),
     listTaskSpaces: async () => spaces,
     taskSpace: async (...a) => { calls.push(['taskSpace', ...a]); return { via: 'taskSpace', a }; },
     claimTaskSpace: async (...a) => { calls.push(['claimTaskSpace', ...a]); return { via: 'claimTaskSpace', a }; },
@@ -31,9 +32,14 @@ describe('openSpace 门禁（不需要 Ego Lite）', () => {
     await assert.rejects(openSpace(ego, { name: NAME, profileId: 'Profile 5' }), /在 Profile 6 上，不是 Profile 5/);
     assert.deepEqual(ego.calls, []);
   });
-  test('ownership=agentDelegatedToUser 抛错，不调接管', async () => {
+  test('ownership=agentDelegatedToUser 抛 user-controlled，不调接管', async () => {
     const ego = fakeEgo([{ id: 7, name: NAME, profileId: 'Profile 5', ownership: 'agentDelegatedToUser' }]);
-    await assert.rejects(openSpace(ego, { name: NAME, profileId: 'Profile 5' }), /由用户控制/);
+    await assert.rejects(openSpace(ego, { name: NAME, profileId: 'Profile 5' }), { code: 'user-controlled', message: /由用户控制/ });
+    assert.deepEqual(ego.calls, []);
+  });
+  test('profile 在 Ego 里不存在：抛 profile-needed，不建 space', async () => {
+    const ego = fakeEgo([], ['Profile 4']);
+    await assert.rejects(openSpace(ego, { name: NAME, profileId: 'Profile 5' }), { code: 'profile-needed' });
     assert.deepEqual(ego.calls, []);
   });
   test('agent 持有：taskSpace(id)', async () => {
