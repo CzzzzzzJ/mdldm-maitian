@@ -1,4 +1,5 @@
 // ego-shim 行为测试：在 Ego Lite Profile 5 的临时 space 里对本地测试页跑真实浏览器。
+import './helpers/ops-dir.mjs';   // 锁目录指到临时目录
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { runEgoTask, finishSpace } from '../src/ego-runner/index.mjs';

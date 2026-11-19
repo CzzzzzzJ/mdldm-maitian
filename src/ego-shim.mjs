@@ -2,14 +2,20 @@
 // 插件的 lib/publish.js、lib/cdp.js 不用改就能在 ego-browser nodejs 脚本里跑。
 // 一个垫片实例绑定一个 space；tabId 是本进程内的数字，内部对应 space 里的 Page label。
 // 对照：chrome-shim.mjs（直连专用 Chrome 的同款垫片）。
+//
+// 前台锁：几个 space 同时切前台会互相抢窗口焦点（spikes/results/04），所以会切前台的步骤
+// （tabs.create/update 带 active:true，以及 withFocus 整段）要先拿全局前台锁（跨 space、跨进程，等待型）。
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { foregroundLockPath, locksDir, waitLock } from './ego-runner/locks.mjs';
 
 const BLANK = /^(about:blank|chrome:\/\/new-?tab(-page)?\/?)?$/;
 
 /**
  * @param {object} task  ego-browser 的 TaskSpace（taskSpace()/claimTaskSpace() 的返回值）
- * @returns {{ chrome: object, recoverTabs: (re: RegExp) => Promise<number[]>, pageOf: (tabId: number) => object }}
+ * @param {{ locksDir?: string, focusTimeoutMs?: number }} [opts]  前台锁所在目录（ego-browser nodejs 不继承环境变量，runner 显式传）；等前台锁最多多久
+ * @returns {{ chrome: object, recoverTabs: (re: RegExp) => Promise<number[]>, pageOf: (tabId: number) => object, withFocus: <T>(fn: () => Promise<T>) => Promise<T> }}
  */
-export function createEgoChrome(task) {
+export function createEgoChrome(task, { locksDir: dir = locksDir(), focusTimeoutMs = 120_000 } = {}) {
   const windowId = task.spaceId;
   const labelById = new Map();
   const idByLabel = new Map();
@@ -41,6 +47,16 @@ export function createEgoChrome(task) {
     if (!tab) { forget(id); throw new Error(`No tab with id: ${id}.`); }
     return tab;
   }
+  // 整段持有全局前台锁；同一调用链里嵌套调用直接执行，不再等锁
+  const holdingFocus = new AsyncLocalStorage();
+  async function withFocus(fn) {
+    if (holdingFocus.getStore()) return fn();
+    const { release } = await waitLock(foregroundLockPath(dir), { timeoutMs: focusTimeoutMs, meta: { spaceId: windowId } });
+    try { return await holdingFocus.run(true, fn); }
+    finally { release(); }
+  }
+  const bringToFront = (page) => withFocus(() => page.cdp('Page.bringToFront'));
+
   const info = async (id, tab) => {
     const page = task.page(tab.label);
     return { id, url: await page.url(), title: await page.title(), windowId, active: !!tab.active };
@@ -63,7 +79,7 @@ export function createEgoChrome(task) {
         const page = reused ?? (await task.newPage());
         try {
           if (url) await page.goto(url);
-          if (active) await page.cdp('Page.bringToFront');
+          if (active) await bringToFront(page);
         } catch (e) {
           // 新开的页出错就关掉，免得长期 space 里留下孤儿页；复用的空白首页是 space 自带的，不关
           if (!reused) await page.close().catch(() => {});
@@ -78,7 +94,7 @@ export function createEgoChrome(task) {
       },
       async update(id, { active } = {}) {
         await liveTab(id);
-        if (active) await pageOf(id).cdp('Page.bringToFront');
+        if (active) await bringToFront(pageOf(id));
         return { id, windowId };
       },
       async remove(ids) {
@@ -110,5 +126,5 @@ export function createEgoChrome(task) {
     return ids;
   }
 
-  return { chrome, recoverTabs, pageOf };
+  return { chrome, recoverTabs, pageOf, withFocus };
 }
