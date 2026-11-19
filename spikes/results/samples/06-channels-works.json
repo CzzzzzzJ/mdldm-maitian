@@ -1,5 +1,5 @@
 {
-  "note": "视频号 statistic/post_list + statistic/fans_trend 的脱敏样例。raw 只留 1 条、URL 去掉查询串、finderUsername 打码；mapped 是按目标格式映射后的结果",
+  "note": "视频号 statistic/post_list + statistic/fans_trend 的脱敏样例。raw 只留 1 条、URL 去掉查询串、finderUsername 和 uniqId（视频号 ID）打码；mapped 是按目标格式映射后的结果",
   "request": {
     "auth": "POST /cgi-bin/mmfinderassistant-bin/auth/auth_data",
     "postList": "POST /micro/statistic/cgi-bin/mmfinderassistant-bin/statistic/post_list {pageSize,currentPage,sort:0,order:0,startTime,endTime,+base}",
@@ -18,7 +18,7 @@
             "createTime": 1794887775,
             "likeCount": 0,
             "commentCount": 1,
-            "readCount": 594,
+            "readCount": 597,
             "forwardCount": 1,
             "favCount": 5,
             "commentClose": 0,
@@ -84,8 +84,8 @@
             "objectNonce": "15958365167909027313",
             "permissionFlag": 0,
             "canSetOriginalsoundTitle": true,
-            "fullPlayRate": 0.12962962962962962,
-            "avgPlayTimeSec": 20.2003367003367,
+            "fullPlayRate": 0.12897822445561138,
+            "avgPlayTimeSec": 20.127303182579563,
             "disableInfo": {
               "isDisabled": false
             },
@@ -101,7 +101,7 @@
               "isOriginalUpgrad": 0
             },
             "followCount": 0,
-            "fastFlipRate": 0.3225806451612903,
+            "fastFlipRate": 0.32262996941896027,
             "forwardSnsCount": 0,
             "forwardAllChatCount": 1,
             "argsInfo": {
@@ -153,7 +153,7 @@
       {
         "postId": "15958365167909027313",
         "objectId": "15056609950977166677",
-        "uid": "<finderUsername>",
+        "uid": "<uniqId>",
         "platform": "Channels",
         "account": "KinsoLee",
         "title": "Claude又送了一张重置卡",
@@ -167,21 +167,21 @@
         "postTime": "2026-11-17 11:56:15",
         "timing": null,
         "url": "https://finder.video.qq.com/251/20302/stodownload?<查询串去掉>",
-        "view": 594,
+        "view": 597,
         "like": 5,
         "comment": 1,
         "forward": 1,
         "love": 0,
         "fansAdd": 0,
-        "fullView": 12.963,
-        "viewTime": 20.2003367003367,
+        "fullView": 12.8978,
+        "viewTime": 20.127303182579563,
         "exportId": "export/UzFfBgAAxIGpHDIyMy6ck8zT4DCa67H-ctR55glkpHT_jtWkyA",
         "platformName": "视频号"
       },
       {
         "postId": "1965162612081491016",
         "objectId": "15056314241034816861",
-        "uid": "<finderUsername>",
+        "uid": "<uniqId>",
         "platform": "Channels",
         "account": "KinsoLee",
         "title": "零基础搭AI员工团队",
@@ -195,23 +195,23 @@
         "postTime": "2026-11-17 02:08:43",
         "timing": null,
         "url": "https://finder.video.qq.com/251/20302/stodownload?<查询串去掉>",
-        "view": 453,
+        "view": 456,
         "like": 4,
         "comment": 0,
         "forward": 3,
         "love": 0,
         "fansAdd": 2,
-        "fullView": 1.1038,
-        "viewTime": 28.611479028697573,
+        "fullView": 1.0965,
+        "viewTime": 28.43201754385965,
         "exportId": "export/UzFfBgAAxImpVGJsLGuck8zT4DCa7Xh0zU2PItTNLywQa3OPjw",
         "platformName": "视频号"
       }
     ],
     "account": {
-      "uid": "<finderUsername>",
+      "uid": "<uniqId>",
       "loginStatus": "登录有效",
       "fans": 416,
-      "updateTime": "2026-11-19 14:26:53",
+      "updateTime": "2026-11-19 15:36:47",
       "daily": [
         {
           "date": "2026-11-18",
