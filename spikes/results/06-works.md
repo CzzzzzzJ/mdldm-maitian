@@ -45,9 +45,32 @@ spikes/platform/run.sh spikes/platform/06-discover.mjs '{"platform":"Bili","urls
 | `postTime` | 只取前 10 位当发布日期，所以必须是东八区本地时间 `YYYY-MM-DD HH:mm:ss` |
 | `account` `title` `url` | 新建笔记时写进去；视频号不写 `url` |
 
-不读：`uid`、`desc`、`cover`、`postType`、`postTypeCode`、`statusText`、`status`、`timing`、`fansDrop`、`view2s`、`view5s`、`fansViewRate`。这些照小V猫的样子产出即可，缺了不影响回填。
+backfill.py 不读：`uid`、`desc`、`cover`、`postType`、`postTypeCode`、`statusText`、`status`、`timing`、`fansDrop`、`view2s`、`view5s`、`fansViewRate`。
+
+**`kinso-dashboard/refresh.py` 也读 `posts-*.json`**（取最新一份，按发布时间分期、算周数据），读这些字段：
+
+| 字段 | 用途 |
+|---|---|
+| `platform` | 只认 `Bili`/`Douyin`/`XiaoHongShu`/`Channels`（`POST_PLATFORM`），别的平台的作品直接忽略 |
+| `postTime` | `datetime.fromisoformat(p['postTime'])` 排序、分期、按周过滤。**不能是 `null` 或空串，否则整个脚本抛错**；格式 `YYYY-MM-DD HH:mm:ss` 能被 fromisoformat 解析 |
+| `statusText` | `== '已发布'` 才算上线：算进播放、互动、涨粉；不是「已发布」的记为异常（`odd`），在看板上显示 `statusText` 原文。**所以 `statusText` 必须产出，已上线的作品必须正好是「已发布」** |
+| `view` `like` `comment` `favorite` `forward` `fansAdd` | 播放、互动（前四个相加）、涨粉 |
+| `title` `cover` `desc` | 看板上一期的标题、封面、副标题 |
+
+四个平台映射出的 `statusText`（见各平台对照表）：
+
+| 平台 | `statusText` 取值 |
+|---|---|
+| 抖音 | `status_value=102` →「已发布」；其它（如 144「不适宜公开」）→「状态未知」 |
+| 小红书 | `audit_status=1` →「已发布」；其它 →「audit_status=<值>」 |
+| B站 | `state=0` →「已发布」；`-6`、`-30` →「审核中」；`-40` →「定时发布」；其它 → `state_desc`，没有就「state=<值>」 |
+| 视频号 | 一律「已发布」（post_list 只含已发表的）；仅自己可见的另外带 `punish: true`，backfill 记「已下架」，refresh.py 仍算上线（和小V猫一致） |
+
+`postTime` 都来自发布时间字段，四个平台这次都没有 `null`。唯一会出空的情况是 **B站未发布的定时稿**：`Archive.ptime=0`，现在的 `06-works-bili.mjs` 会因 `cst(0)` 得到 `null`。S3 要改成 `ptime` 为 0 时用定时时间 `dtime`，再没有就用投稿时间 `ctime`（`timing` 照填 `dtime`）。这次账号里没有定时稿，没实测到；探针文件不在本轮修改范围，没改。
 
 **`accounts-*.json` 不是 backfill.py 读的**，是 `kinso-dashboard/refresh.py` 的 `ingest_accounts` 读的：`uid`（必须和 refresh.py 里登记的一致才收）、`fans`、`updateTime`、`loginStatus`（不是「登录有效」就提示）、`daily[].date`、`daily[].fansTotal`（0 和 null 都当作没同步到）、`daily[].fansNet`。
+
+refresh.py 登记的 uid：B站 `478358005`、抖音 `106707338905`、小红书 `5944af205e87e701889da649`、视频号 = `finderUser.uniqId`、**公众号 `3076192038`**。公众号这个 uid 不是 `gh_eb2c407bc687`（原始 ID），写 `accounts-*.json` 时必须用 `3076192038`，否则会被丢掉。公众号粉丝的读法归 S4，S3 衔接时按这个 uid 写。
 
 下面的对照表里，「换算」一栏写的是麦田要做的处理；「← 无」表示平台拿不到，照写 `null`。
 
@@ -56,7 +79,7 @@ spikes/platform/run.sh spikes/platform/06-discover.mjs '{"platform":"Bili","urls
 ### 读法
 
 1. 先 `goto https://creator.douyin.com/creator-micro/content/manage`，在这个页面里 `page.fetch`。
-2. 作品：`GET /janus/douyin/creator/pc/work_list?status=0&count=30&max_cursor=<游标>&scene=star_atlas&device_platform=android&aid=1128`。第一页游标 0，之后用响应里的 `max_cursor`，`has_more=false` 或这一页最早的作品早于窗口就停。按发布时间倒序，置顶作品排在最前（2025-05-31 那条），判断「早于窗口」时要跳过置顶。
+2. 作品：`GET /janus/douyin/creator/pc/work_list?status=0&count=30&max_cursor=<游标>&scene=star_atlas&device_platform=android&aid=1128`。第一页游标 0，之后用响应里的 `max_cursor`，`has_more=false`、空页、或这一页最早的**非置顶**作品早于窗口就停。按发布时间倒序，但置顶作品排在第一页最前（这次是 2025-05-31 那条）。置顶字段是 `aweme_list[].is_pinned`：置顶时为 `true`，**非置顶时这个键不存在**（11-19 原始响应第一页 30 条：1 条 `true`，29 条没有这个键）。算「最早一条」时排除 `is_pinned === true`；一页全是置顶时不据此停，看 `has_more`。窗口过滤用 `create_time >= 窗口起点`，置顶的老作品自然被排除。样例 `samples/06-douyin-works.json` 的 `raw.work_list.aweme_list` 留了置顶、非置顶各一条。
 3. 粉丝：`GET /web/api/media/user/info/` 的 `user.follower_count` 是实时总数；`GET /janus/douyin/creator/data/overview/dashboard/fans?recent_days=30` 是分日（到昨天为止）。两个都不用签名。
 4. 坑：`items[].id` 超过 2^53，要先用正则把它改成字符串再 `JSON.parse`；作品 id 用 `aweme_list[].aweme_id`（本来就是字符串）。`metrics` 的值都是字符串。
 
@@ -185,8 +208,8 @@ spikes/platform/run.sh spikes/platform/06-discover.mjs '{"platform":"Bili","urls
 | title / desc / cover | `Archive.title` / `Archive.desc` / `Archive.cover` | |
 | postType / postTypeCode | — | 常量「视频」/`"1"`（图文在另一个管理页，不在本接口） |
 | status | `Archive.state` | 转字符串；0 =「开放浏览」 |
-| publishStatus / statusText | `Archive.state` | 0 → `published`/已发布；-40 → 定时；其它 → `unknown`，`statusText` 用 `state_desc`。这次只见到 0 |
-| postTime | `Archive.ptime` | 秒 → 东八区 |
+| publishStatus / statusText | `Archive.state` | 0 → `published`/已发布；-6、-30 → `reviewing`/审核中；-40 → `timing`/定时发布；其它 → `unknown`，`statusText` 用 `state_desc`（没有就 `state=<值>`）。这次只见到 0 |
+| postTime | `Archive.ptime` | 秒 → 东八区。**未发布的定时稿 `ptime=0`**：改用 `dtime`，再没有用 `ctime`，不能输出 `null`（refresh.py 会抛错） |
 | timing | `Archive.dtime` | 晚于现在时是定时发布时间，否则 `null` |
 | url | — | 拼 `https://www.bilibili.com/video/${bvid}` |
 | view | `stat.view` | 稿件管理页「播放」；数据中心的 `compare.stat.play` 和它不总是同一时刻的数 |
@@ -235,7 +258,7 @@ spikes/platform/run.sh spikes/platform/06-discover.mjs '{"platform":"Bili","urls
 | cover | `desc.media[0].coverUrl` | 带 `token`，会过期，不要存进仓库 |
 | postType / postTypeCode | — | 「视频」/`"1"`（`objectType=0`）；图文没见到 |
 | status | `status` | 转字符串，这次全是 1 |
-| publishStatus / statusText | `status` | 1 → `published`/已发布 |
+| publishStatus / statusText | — | 一律 `published`/已发布（post_list 只含已发表的）；仅自己可见的看 `punish` |
 | punish / punishReason | `disableInfo.isDisabled` / `disableInfo.disableAddWording` | 只在 `isDisabled=true` 时输出。11-09 那条是 `visibleType=3`、「仅自己可见」，小V猫同一条是 `punish=true`，backfill 记成「已下架」 |
 | postTime | `createTime` | 秒 → 东八区 |
 | timing | ← 无 | post_list 只含已发表的 |
@@ -266,11 +289,12 @@ spikes/platform/run.sh spikes/platform/06-discover.mjs '{"platform":"Bili","urls
 
 1. **id 体系**：视频号 postId 用 `objectNonce`，抖音用 `aweme_id`（字符串），B站用 `bvid`，小红书用 `id`。和小V猫一致，已有笔记能按 `post_id` 接上。
 2. **单位**：`fullView` 一律产出百分数（抖音、视频号 ×100）；B站、小红书没有完播率，写 `null`，不要拿 B站的「平均播放进度」顶。`viewTime` 一律秒。
-3. **时间**：`postTime` 一律东八区 `YYYY-MM-DD HH:mm:ss`；抖音、B站、视频号是秒，小红书是毫秒。
-4. **签名**：只有小红书的两个作品列表接口要签名，用页面自带的 `_webmsxyw`，所以必须在已登录的创作者中心页面里跑，不能脱离浏览器。
-5. **字段名反直觉的**：视频号 `favCount`=点赞、`likeCount`=推荐；B站 `total_inc`=当天总数、`full_play_ratio`=平均播放进度；抖音 `forward`←`share_count`。
-6. **会过期的 URL**：抖音 cover、视频号 cover/url 都带签名或 token，只当时有效；小红书 url 小V猫带了 `xsec_token`。这些都不要写进仓库。
-7. **限频**：这次每个平台只翻 1–2 页，间隔 2.5 秒，没遇到限流或风控提示。B站 compare 接口一次要 30 条就够，不用翻页。
+3. **时间**：`postTime` 一律东八区 `YYYY-MM-DD HH:mm:ss`，**不能为空**（refresh.py 直接 fromisoformat）；抖音、B站、视频号是秒，小红书是毫秒；B站定时稿 `ptime=0` 用 `dtime`。
+4. **状态**：`statusText` 必须产出，已上线的必须正好是「已发布」（refresh.py 按它判上线）。
+5. **签名**：只有小红书的两个作品列表接口要签名，用页面自带的 `_webmsxyw`，所以必须在已登录的创作者中心页面里跑，不能脱离浏览器。
+6. **字段名反直觉的**：视频号 `favCount`=点赞、`likeCount`=推荐；B站 `total_inc`=当天总数、`full_play_ratio`=平均播放进度；抖音 `forward`←`share_count`。
+7. **会过期的 URL**：抖音 cover、视频号 cover/url 都带签名或 token，只当时有效；小红书 url 小V猫带了 `xsec_token`。这些都不要写进仓库。
+8. **限频**：这次每个平台只翻 1–2 页，间隔 2.5 秒，没遇到限流或风控提示。B站 compare 接口一次要 30 条就够，不用翻页。
 
 ## 不通过时的替代路线（只记录）
 

@@ -5,6 +5,7 @@ import { EGO_SKIP, tempSpaceName } from './helpers/ego.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const HANG_BIN = fileURLToPath(new URL('./fixtures/hang-ego-browser.mjs', import.meta.url));
 const CLI = fileURLToPath(new URL('../src/ego-runner/cli.mjs', import.meta.url));
 
 describe('parseResult（不需要 Ego Lite）', () => {
@@ -44,6 +45,18 @@ describe('runEgoTask 参数检查（不需要 Ego Lite）', () => {
   test('ego-browser 起不来是失败', async () => {
     const r = await runEgoScript('console.log(1)', { egoBin: '/nonexistent/ego-browser' });
     assert.equal(r.ok, false); assert.equal(r.reason, 'spawn-failed');
+  });
+  test('超时是失败：杀掉 CLI，返回 reason=timeout，不留子进程', async () => {
+    const t0 = Date.now();
+    // 2 秒：留够 node 冷启动的时间，让假程序先打出 pid 再被杀（300ms 时冷启动偶尔来不及）
+    const r = await runEgoScript('console.log(1)', { egoBin: HANG_BIN, timeoutMs: 2000 });
+    assert.ok(Date.now() - t0 < 6000, '超时后应很快返回');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'timeout');
+    assert.match(r.error, /超过 2000ms/);
+    const pid = Number(r.stderr.match(/hang-pid (\d+)/)?.[1]);
+    assert.ok(pid > 0, '假 ego-browser 应已启动');
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, '子进程应已被杀掉');
   });
 });
 
@@ -102,7 +115,10 @@ describe('命令行入口', () => {
   test('从 stdin 读脚本跑完并 --finish 关掉 space', { skip: EGO_SKIP ?? false }, async () => {
     const space = tempSpaceName('cli');
     const r = await cli(['--space', space, '--params', '{"x":2}', '--finish'], 'return params.x * 21');
-    assert.equal(r.code, 0); assert.deepEqual(r.json, { ok: true, result: 42, code: 0, signal: null });
+    assert.equal(r.code, 0);
+    const { finish, ...task } = r.json;
+    assert.deepEqual(task, { ok: true, result: 42, code: 0, signal: null });
+    assert.equal(finish.ok, true); assert.equal(finish.result.closedSpace, true);
     const left = await runEgoScript(`console.log("@@RESULT " + JSON.stringify((await listTaskSpaces()).some((s) => s.name === ${JSON.stringify(space)})))`);
     assert.equal(left.result, false);
   });

@@ -34,7 +34,12 @@ const r = await runEgoTask({
   script,
   ...(values['timeout-ms'] ? { timeoutMs: Number(values['timeout-ms']) } : {}),
 });
-if (values.finish && r.reason !== 'bad-space-name' && r.reason !== 'profile-rejected') await finishSpace(values.space);
+let fin = null;
+if (values.finish && r.reason !== 'bad-space-name' && r.reason !== 'profile-rejected') {
+  const { stdout: _o, stderr: _e, ...f } = await finishSpace(values.space, { profileId: values.profile });
+  fin = f;
+}
 const { stdout = "", stderr = "", ...summary } = r;
-console.log(JSON.stringify(r.ok ? summary : { ...summary, output: (stdout + stderr).slice(-2000) }));
-process.exit(r.ok ? 0 : 1);
+const ok = r.ok && (!fin || fin.ok);
+console.log(JSON.stringify({ ...(r.ok ? summary : { ...summary, output: (stdout + stderr).slice(-2000) }), ...(fin ? { finish: fin } : {}) }));
+process.exit(ok ? 0 : 1);

@@ -1,5 +1,5 @@
 {
-  "note": "抖音 work_list + dashboard/fans 的脱敏样例。raw 只留 1 条、URL 去掉查询串；mapped 是按目标格式（vcat posts/accounts）映射后的结果",
+  "note": "抖音 work_list + dashboard/fans 的脱敏样例。raw 留置顶和非置顶各 1 条、URL 去掉查询串；mapped 是按目标格式（vcat posts/accounts）映射后的结果",
   "request": {
     "list": "/janus/douyin/creator/pc/work_list?status=0&count=30&max_cursor=<max_cursor>&scene=star_atlas&device_platform=android&aid=1128",
     "fans": "/janus/douyin/creator/data/overview/dashboard/fans?recent_days=30",
@@ -14,6 +14,7 @@
       "aweme_list": [
         {
           "aweme_id": "7510302804091669771",
+          "is_pinned": true,
           "item_title": "我要去世了豆包",
           "desc": "我要去世了豆包 #AI #DeepSeek #ChatGPT #心理咨询",
           "create_time": 1748629314,
@@ -48,7 +49,50 @@
             "cover": {
               "uri": "tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938",
               "url_list": [
-                "https://p26-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
+                "https://p26-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>",
+                "https://p11-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
+              ]
+            }
+          }
+        },
+        {
+          "aweme_id": "7708984451971452170",
+          "item_title": "Claude又送了一张重置卡，昨天开的新号结果出来了",
+          "desc": "Claude又送了一张重置卡，昨天开的新号结果出来了 一睡醒，Claude 又给我发了一张重置卡。昨天说的那个新号我也去搞了，结果跟我想的不太一样，后面再给大家验证一下。说个题外话，它这么一直送，你这个 Codex 还有什么优势？ #claude #ai工具 #ai编程 #chatgpt #claudeultra",
+          "create_time": 1794887817,
+          "aweme_type": 4,
+          "duration": 68502,
+          "status_value": 102,
+          "status": {
+            "allow_comment": true,
+            "allow_share": true,
+            "aweme_id": "7708984451971452170",
+            "in_reviewing": false,
+            "is_delete": false,
+            "is_private": false,
+            "is_prohibited": false,
+            "private_status": 0,
+            "reviewed": false,
+            "self_see": false,
+            "with_fusion_goods": false,
+            "with_goods": false
+          },
+          "statistics": {
+            "aweme_id": "7708984451971452170",
+            "collect_count": 10,
+            "comment_count": 14,
+            "digg_count": 31,
+            "forward_count": 0,
+            "live_watch_count": 0,
+            "play_count": 5126,
+            "share_count": 0
+          },
+          "video": {
+            "cover": {
+              "uri": "tos-cn-i-dy/780b81ddd1b94a15b9cb47763ec00714",
+              "url_list": [
+                "https://p11-sign.douyinpic.com/tos-cn-i-dy/780b81ddd1b94a15b9cb47763ec00714~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>",
+                "https://p5-ex-gddgtc-sign.douyinpic.com/tos-cn-i-dy/780b81ddd1b94a15b9cb47763ec00714~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
               ]
             }
           }
@@ -60,7 +104,8 @@
           "cover": {
             "uri": "tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938",
             "url_list": [
-              "https://p26-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
+              "https://p26-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>",
+              "https://p11-sign.douyinpic.com/tos-cn-i-dy/00b48d1d0fcf49d5890d458f87501938~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
             ]
           },
           "create_time": 1748629314,
@@ -102,6 +147,57 @@
           "user_id": 106707338905,
           "video_info": {
             "duration": 78624,
+            "is_vr": false
+          },
+          "visibility": {}
+        },
+        {
+          "collaborative": false,
+          "cover": {
+            "uri": "tos-cn-i-dy/780b81ddd1b94a15b9cb47763ec00714",
+            "url_list": [
+              "https://p11-sign.douyinpic.com/tos-cn-i-dy/780b81ddd1b94a15b9cb47763ec00714~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>",
+              "https://p5-ex-gddgtc-sign.douyinpic.com/tos-cn-i-dy/780b81ddd1b94a15b9cb47763ec00714~tplv-dy-resize-walign-adapt-aq:540:q75.webp?<查询串去掉>"
+            ]
+          },
+          "create_time": 1794887817,
+          "description": "Claude又送了一张重置卡，昨天开的新号结果出来了 一睡醒，Claude 又给我发了一张重置卡。昨天说的那个新号我也去搞了，结果跟我想的不太一样，后面再给大家验证一下。说个题外话，它这么一直送，你这个 Codex 还有什么优势？ #claude #ai工具 #ai编程 #chatgpt #claudeultra",
+          "downloadable": false,
+          "id": "7708984451971452170",
+          "metrics": {
+            "avg_view_proportion": "0.205039",
+            "avg_view_second": "14.045611",
+            "bounce_rate_2s": "0.281807",
+            "comment_count": "14",
+            "comment_rate": "0.002731",
+            "completion_rate": "0.047969",
+            "completion_rate_5s": "0.464520",
+            "cover_show": "72",
+            "danmaku_count": "0",
+            "dislike_count": "0",
+            "dislike_rate": "0.000000",
+            "download_count": "0",
+            "fan_view_proportion": "0.009559",
+            "favorite_count": "10",
+            "favorite_rate": "0.001951",
+            "homepage_visit_count": "146",
+            "like_count": "31",
+            "like_rate": "0.006048",
+            "share_count": "0",
+            "share_rate": "0.000000",
+            "subscribe_count": "2",
+            "subscribe_rate": "0.000390",
+            "unsubscribe_count": "0",
+            "unsubscribe_rate": "0.000000",
+            "view_count": "5126"
+          },
+          "review": {
+            "status": 2
+          },
+          "type": 3,
+          "user_id": 106707338905,
+          "video_info": {
+            "duration": 68502,
             "is_vr": false
           },
           "visibility": {}

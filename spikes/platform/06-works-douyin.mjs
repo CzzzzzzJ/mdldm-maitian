@@ -29,8 +29,11 @@ for (let i = 0; i < args.maxPages; i++) {
   const p = await fetchList(cursor);
   pages.push(p);
   const list = p.json.aweme_list ?? [];
-  const oldest = Math.min(...list.map((a) => a.create_time));
-  if (!p.json.has_more || oldest < since) break;
+  // 置顶作品 is_pinned=true（非置顶时没有这个键），排在第一页最前，发布时间可能很早（2025-05-31），算「最早一条」时要跳过。
+  // 这一页全是置顶（没有非置顶）时 oldest 记为 Infinity，靠 has_more 决定是否翻页；空页直接停
+  const unpinned = list.filter((a) => !a.is_pinned);
+  const oldest = unpinned.length ? Math.min(...unpinned.map((a) => a.create_time)) : Infinity;
+  if (!list.length || !p.json.has_more || oldest < since) break;
   cursor = p.json.max_cursor;
   await sleep(2500);
 }
@@ -90,13 +93,16 @@ const out = {
   sample: posts.slice(0, 2),
 };
 await saveRaw('06-douyin-worklist', { pages: pages.map((p) => p.json), info: info.json, fans: fans.json });
+// 样例留置顶的一条（带 is_pinned）和第一条非置顶的（没有 is_pinned 键），让下游看到两种形状
+const firstPage = pages[0].json.aweme_list ?? [];
+const sampleAweme = [firstPage.find((a) => a.is_pinned), firstPage.find((a) => !a.is_pinned)].filter(Boolean);
 out.sampleFile = await saveSample('06-douyin-works', {
-  note: '抖音 work_list + dashboard/fans 的脱敏样例。raw 只留 1 条、URL 去掉查询串；mapped 是按目标格式（vcat posts/accounts）映射后的结果',
+  note: '抖音 work_list + dashboard/fans 的脱敏样例。raw 留置顶和非置顶各 1 条、URL 去掉查询串；mapped 是按目标格式（vcat posts/accounts）映射后的结果',
   request: { list: listUrl('<max_cursor>'), fans: '/janus/douyin/creator/data/overview/dashboard/fans?recent_days=30', user: '/web/api/media/user/info/' },
   // aweme 对象很大（音乐、评论、贴纸…），样例只留映射用得着的键
   raw: { work_list: scrub({ status_code: pages[0].json.status_code, total: pages[0].json.total, has_more: pages[0].json.has_more, max_cursor: pages[0].json.max_cursor,
-    aweme_list: pages[0].json.aweme_list.slice(0, 1).map((a) => ({ aweme_id: a.aweme_id, item_title: a.item_title, desc: a.desc, create_time: a.create_time, aweme_type: a.aweme_type, duration: a.duration, status_value: a.status_value, status: a.status, statistics: a.statistics, video: { cover: a.video?.cover } })),
-    items: pages[0].json.items.slice(0, 1) }, 1), fans: scrub(fans.json, 1) },
+    aweme_list: sampleAweme.map((a) => ({ aweme_id: a.aweme_id, is_pinned: a.is_pinned, item_title: a.item_title, desc: a.desc, create_time: a.create_time, aweme_type: a.aweme_type, duration: a.duration, status_value: a.status_value, status: a.status, statistics: a.statistics, video: { cover: a.video?.cover } })),
+    items: sampleAweme.map((a) => pages[0].json.items.find((x) => String(x.id) === a.aweme_id)).filter(Boolean) }, 2), fans: scrub(fans.json, 1) },
   mapped: { posts: scrub(posts.slice(0, 2)), account: scrub({ ...acct, daily: acct.daily.slice(-2) }) },
 });
 console.log(JSON.stringify(out, null, 1));
