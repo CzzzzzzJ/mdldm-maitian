@@ -1,0 +1,233 @@
+{
+  "note": "视频号 statistic/post_list + statistic/fans_trend 的脱敏样例。raw 只留 1 条、URL 去掉查询串、finderUsername 和 uniqId（视频号 ID）打码；mapped 是按目标格式映射后的结果",
+  "request": {
+    "auth": "POST /cgi-bin/mmfinderassistant-bin/auth/auth_data",
+    "postList": "POST /micro/statistic/cgi-bin/mmfinderassistant-bin/statistic/post_list {pageSize,currentPage,sort:0,order:0,startTime,endTime,+base}",
+    "fansTrend": "POST /micro/statistic/cgi-bin/mmfinderassistant-bin/statistic/fans_trend {startTs,endTs,interval:3,+base}",
+    "base": "{_log_finder_uin:\"\",_log_finder_id:<finderUsername>,rawKeyBuff:\"\",pluginSessionId:null,scene:7,reqScene:7,timestamp}"
+  },
+  "raw": {
+    "postList": {
+      "errCode": 0,
+      "errMsg": "request successful",
+      "data": {
+        "list": [
+          {
+            "commentList": [],
+            "objectId": "15056609950977166677",
+            "createTime": 1794887775,
+            "likeCount": 0,
+            "commentCount": 1,
+            "readCount": 597,
+            "forwardCount": 1,
+            "favCount": 5,
+            "commentClose": 0,
+            "visibleType": 1,
+            "status": 1,
+            "desc": {
+              "media": [
+                {
+                  "spec": [],
+                  "url": "https://finder.video.qq.com/251/20302/stodownload?<查询串去掉>",
+                  "thumbUrl": "https://finder.video.qq.com/251/20304/stodownload?<查询串去掉>",
+                  "mediaType": 4,
+                  "videoPlayLen": 68,
+                  "width": 1080,
+                  "height": 1920,
+                  "md5sum": "1b92716ee9e46f6bc3aea0fa3e140c15",
+                  "fileSize": "69647348",
+                  "bitrate": 8130560,
+                  "coverUrl": "https://finder.video.qq.com/251/20304/stodownload?<查询串去掉>",
+                  "fullThumbUrl": "",
+                  "fullUrl": "",
+                  "fullWidth": 0,
+                  "fullHeight": 0,
+                  "fullMd5sum": "",
+                  "fullFileSize": "0",
+                  "fullBitrate": 0,
+                  "halfRect": {},
+                  "fullCoverUrl": "https://finder.video.qq.com/251/20304/stodownload?<查询串去掉>",
+                  "cardShowStyle": 0,
+                  "shareCoverUrl": "",
+                  "shareCoverShowStyle": 0
+                }
+              ],
+              "mentionedMusics": [],
+              "shortTitle": [
+                {
+                  "shortTitle": "Claude又送了一张重置卡"
+                }
+              ],
+              "description": "一睡醒，Claude 又给我发了一张重置卡。昨天说的那个新号也去搞了，结果跟我想的不太一样。 #Claude #AI工具 #AI编程",
+              "mediaType": 4,
+              "location": {},
+              "extReading": {},
+              "topic": {},
+              "feedLocation": {},
+              "event": {
+                "eventTopicId": "",
+                "eventName": "",
+                "eventCreatorNickname": "",
+                "eventAttendCount": 0
+              },
+              "audio": {},
+              "member": {},
+              "finderNewlifeDesc": {},
+              "modFeedInfo": {
+                "history": [],
+                "modifyButtonStatus": 1,
+                "buttonTipsWording": "发表超过24小时后无法修改"
+              }
+            },
+            "objectType": 0,
+            "flag": 96,
+            "objectNonce": "15958365167909027313",
+            "permissionFlag": 0,
+            "canSetOriginalsoundTitle": true,
+            "fullPlayRate": 0.12897822445561138,
+            "avgPlayTimeSec": 20.127303182579563,
+            "disableInfo": {
+              "isDisabled": false
+            },
+            "showOriginal": true,
+            "exportId": "export/UzFfBgAAxIGpHDIyMy6ck8zT4DCa67H-ctR55glkpHT_jtWkyA",
+            "ringsetCount": 0,
+            "snscoverCount": 0,
+            "statusrefCount": 0,
+            "forwardAggregationCount": 1,
+            "originalInfo": {
+              "auditOriginalFlag": 5,
+              "isDeclared": 1,
+              "isOriginalUpgrad": 0
+            },
+            "followCount": 0,
+            "fastFlipRate": 0.32262996941896027,
+            "forwardSnsCount": 0,
+            "forwardAllChatCount": 1,
+            "argsInfo": {
+              "poiCheckSum": "d41d8cd98f00b204e9800998ecf8427e"
+            },
+            "yesterdayReadCount": 89,
+            "wecomLinkClickCount": 0,
+            "wecomContactAddCount": 0,
+            "wecomLinkClickUv": 0,
+            "wecomContactAddUv": 0
+          }
+        ],
+        "totalCount": 16
+      }
+    },
+    "fansTrend": {
+      "errCode": 0,
+      "data": {
+        "add": [
+          0,
+          0,
+          0
+        ],
+        "reduce": [
+          0,
+          0,
+          0
+        ],
+        "netAdd": [
+          0,
+          0,
+          0
+        ],
+        "total": [
+          175,
+          175,
+          175
+        ]
+      }
+    },
+    "finderUser": {
+      "nickname": "KinsoLee",
+      "fansCount": 416,
+      "feedsCount": 61
+    }
+  },
+  "mapped": {
+    "posts": [
+      {
+        "postId": "15958365167909027313",
+        "objectId": "15056609950977166677",
+        "uid": "<uniqId>",
+        "platform": "Channels",
+        "account": "KinsoLee",
+        "title": "Claude又送了一张重置卡",
+        "desc": "一睡醒，Claude 又给我发了一张重置卡。昨天说的那个新号也去搞了，结果跟我想的不太一样。 #Claude #AI工具 #AI编程",
+        "cover": "https://finder.video.qq.com/251/20304/stodownload?<查询串去掉>",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "published",
+        "statusText": "已发布",
+        "status": "1",
+        "postTime": "2026-11-17 11:56:15",
+        "timing": null,
+        "url": "https://finder.video.qq.com/251/20302/stodownload?<查询串去掉>",
+        "view": 597,
+        "like": 5,
+        "comment": 1,
+        "forward": 1,
+        "love": 0,
+        "fansAdd": 0,
+        "fullView": 12.8978,
+        "viewTime": 20.127303182579563,
+        "exportId": "export/UzFfBgAAxIGpHDIyMy6ck8zT4DCa67H-ctR55glkpHT_jtWkyA",
+        "platformName": "视频号"
+      },
+      {
+        "postId": "1965162612081491016",
+        "objectId": "15056314241034816861",
+        "uid": "<uniqId>",
+        "platform": "Channels",
+        "account": "KinsoLee",
+        "title": "零基础搭AI员工团队",
+        "desc": "凌晨一点你在睡觉，你的 AI 团队还在干活。从下载讲到怎么搭团队、怎么让它们到点自己开工，最后是我用下来的三点感受，第三点很多人是用了才知道。 #AI智能体 #AI员工 #AI助手",
+        "cover": "https://finder.video.qq.com/251/20304/stodownload?<查询串去掉>",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "published",
+        "statusText": "已发布",
+        "status": "1",
+        "postTime": "2026-11-17 02:08:43",
+        "timing": null,
+        "url": "https://finder.video.qq.com/251/20302/stodownload?<查询串去掉>",
+        "view": 456,
+        "like": 4,
+        "comment": 0,
+        "forward": 3,
+        "love": 0,
+        "fansAdd": 2,
+        "fullView": 1.0965,
+        "viewTime": 28.43201754385965,
+        "exportId": "export/UzFfBgAAxImpVGJsLGuck8zT4DCa7Xh0zU2PItTNLywQa3OPjw",
+        "platformName": "视频号"
+      }
+    ],
+    "account": {
+      "uid": "<uniqId>",
+      "loginStatus": "登录有效",
+      "fans": 416,
+      "updateTime": "2026-11-19 15:36:47",
+      "daily": [
+        {
+          "date": "2026-11-18",
+          "fansTotal": 405,
+          "fansNet": 37,
+          "fansAdd": 37,
+          "fansDrop": 0
+        },
+        {
+          "date": "2026-11-19",
+          "fansTotal": 416,
+          "fansNet": 11,
+          "fansAdd": 11,
+          "fansDrop": 0
+        }
+      ]
+    }
+  }
+}
