@@ -94,6 +94,32 @@ export async function captured(page, filter = '.') {
 
 export const pathOnly = (u) => { try { const x = new URL(u, 'https://x.invalid'); return x.pathname; } catch { return String(u).split('?')[0]; } };
 
+// 提交用的脱敏样例：数组只留前 n 条；凭据类键整段去掉；URL 去掉查询串（签名、xsec_token、过期参数都在里面）
+const SECRET_KEY = /cookie|token|sign|xsec|bogus|phone|mobile|passport|ticket|session|auth_key|encfilekey|fingerprint|csrf/i;
+export function scrub(v, n = 2) {
+  if (Array.isArray(v)) return v.slice(0, n).map((x) => scrub(x, n));
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) o[k] = SECRET_KEY.test(k) ? '<去掉>' : scrub(x, n);
+    return o;
+  }
+  // 字符串里任何位置的 URL（包括嵌在 JSON 字符串里的）都去掉查询串
+  if (typeof v === 'string') return v.replace(/(https?:\/\/[^\s"'?]+)\?[^\s"']*/g, '$1?<查询串去掉>');
+  return v;
+}
+
+export async function saveSample(name, data) {
+  const dir = `${globalThis.SPIKE_ROOT}/spikes/results/samples`;
+  await mkdir(dir, { recursive: true });
+  const file = `${dir}/${name}.json`;
+  await writeFile(file, `${JSON.stringify(data, null, 2)}\n`);
+  return file;
+}
+
+// 平台时间 → 目标格式的 postTime：东八区本地时间 "YYYY-MM-DD HH:mm:ss"（小V猫导出就是这个格式）
+export const cst = (sec) => (sec ? new Date(sec * 1000 + 8 * 3600_000).toISOString().replace('T', ' ').slice(0, 19) : null);
+export const DAY = 86400;
+
 // 递归列出对象里的键路径（只要名字，不要值），用来找字段来源
 export function keyPaths(obj, prefix = '', depth = 0, out = new Set()) {
   if (obj == null || typeof obj !== 'object' || depth > 5) return out;

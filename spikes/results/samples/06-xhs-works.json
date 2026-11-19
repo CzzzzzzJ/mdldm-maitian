@@ -1,0 +1,300 @@
+{
+  "note": "小红书 note/analyze/list（要签名）+ note/user/posted（要签名）+ fans/overall_new 的脱敏样例。raw 只留 1 条、URL 去掉查询串、xsec_token 去掉；mapped 是按目标格式映射后的结果",
+  "request": {
+    "analyze": "/api/galaxy/creator/datacenter/note/analyze/list?post_begin_time=1792425600000&post_end_time=1795103999000&type=0&page_size=10&page_num=<page_num>",
+    "posted": "/api/galaxy/v2/creator/note/user/posted?tab=0&page=<n>",
+    "fans": "/api/galaxy/creator/data/fans/overall_new",
+    "personal_info": "/api/galaxy/creator/home/personal_info",
+    "signing": "X-s/X-t = window._webmsxyw(path, undefined)，在页面里算"
+  },
+  "raw": {
+    "analyze": {
+      "code": 0,
+      "success": true,
+      "msg": "成功",
+      "data": {
+        "result": {
+          "success": true,
+          "code": 0,
+          "message": "success"
+        },
+        "note_infos": [
+          {
+            "type": 2,
+            "read_count": 1224,
+            "fav_count": 3,
+            "update_time": 1794890304000,
+            "user_update_time": 1794887839000,
+            "cover_url": "http://sns-na-i4.xhscdn.com/spectrum/1040g34o327ljdkvt6c0049kavkni19i9cqg8u28?<查询串去掉>",
+            "increase_fans_count": 0,
+            "audit_status": 1,
+            "like_count": 5,
+            "danmaku_count": 0,
+            "view_time_avg": 20,
+            "imp_count": 3145,
+            "id": "6afbd09e00000000250132bd",
+            "title": "Claude又送重置卡，新号结果出来了",
+            "post_time": 1794887838000,
+            "comment_count": 3,
+            "share_count": 0,
+            "coverClickRate": 0.272
+          }
+        ],
+        "total": 15
+      }
+    },
+    "posted": {
+      "code": 0,
+      "success": true,
+      "msg": "成功",
+      "data": {
+        "tags": [
+          {
+            "notes_count": 49,
+            "checked": true,
+            "id": "special.note_time_desc",
+            "name": "所有笔记"
+          }
+        ],
+        "page": 1,
+        "notes": [
+          {
+            "images_list": [
+              {
+                "url": "http://sns-na-i4.xhscdn.com/spectrum/1040g0k031i49l2qo6m0049kavkni19i9oqqvj7g?<查询串去掉>"
+              }
+            ],
+            "permission_code": 0,
+            "permission_msg": "",
+            "xsec_source": "<去掉>",
+            "id": "6839f76a00000000230012ba",
+            "display_title": "我要去世了豆包",
+            "time": "2025-05-31 02:22",
+            "sticky": true,
+            "tab_status": 1,
+            "cocreate": false,
+            "pk_cover_status": 0,
+            "visible_time": 1748629418,
+            "view_count": 275061,
+            "shared_count": 85,
+            "collected_count": 3808,
+            "xsec_token": "<去掉>",
+            "ref_tip": 0,
+            "type": "video",
+            "likes": 5961,
+            "comments_count": 92,
+            "video_info": {
+              "duration": 78
+            },
+            "schedule_post_time": 0
+          }
+        ]
+      }
+    },
+    "fans": {
+      "result": 0,
+      "success": true,
+      "code": 0,
+      "data": {
+        "thirty": {
+          "rise_fans_count": 25,
+          "leave_fans_count": 2,
+          "fans_count": 2568,
+          "rise_fans_list": [
+            {
+              "date": 1792339200000,
+              "count": 0,
+              "set_count": true,
+              "set_date": true
+            },
+            {
+              "date": 1792425600000,
+              "count": 0,
+              "set_count": true,
+              "set_date": true
+            }
+          ],
+          "leave_fans_list": [
+            {
+              "date": 1792339200000,
+              "count": 0,
+              "set_count": true,
+              "set_date": true
+            },
+            {
+              "date": 1792425600000,
+              "count": 1,
+              "set_count": true,
+              "set_date": true
+            }
+          ],
+          "fans_list": [
+            {
+              "date": 1792339200000,
+              "count": 2544,
+              "set_count": true,
+              "set_date": true
+            },
+            {
+              "date": 1792425600000,
+              "count": 2543,
+              "set_count": true,
+              "set_date": true
+            }
+          ],
+          "fans_list_size": 30,
+          "fans_list_iterator": [
+            {
+              "date": 1792339200000,
+              "count": 2544,
+              "set_count": true,
+              "set_date": true
+            },
+            {
+              "date": 1792425600000,
+              "count": 2543,
+              "set_count": true,
+              "set_date": true
+            }
+          ],
+          "set_fans_list": true,
+          "set_rise_fans_count": true,
+          "set_leave_fans_count": true,
+          "rise_fans_list_size": 30,
+          "rise_fans_list_iterator": [
+            {
+              "date": 1792339200000,
+              "count": 0,
+              "set_count": true,
+              "set_date": true
+            },
+            {
+              "date": 1792425600000,
+              "count": 0,
+              "set_count": true,
+              "set_date": true
+            }
+          ],
+          "set_rise_fans_list": true,
+          "leave_fans_list_size": 30,
+          "leave_fans_list_iterator": [
+            {
+              "date": 1792339200000,
+              "count": 0,
+              "set_count": true,
+              "set_date": true
+            },
+            {
+              "date": 1792425600000,
+              "count": 1,
+              "set_count": true,
+              "set_date": true
+            }
+          ],
+          "set_leave_fans_list": true,
+          "set_fans_count": true
+        }
+      }
+    },
+    "personal_info": {
+      "code": 0,
+      "data": {
+        "name": "炤见AI出海",
+        "fans_count": 2568,
+        "follow_count": 786
+      }
+    }
+  },
+  "mapped": {
+    "posts": [
+      {
+        "postId": "6afbd09e00000000250132bd",
+        "uid": "5944af205e87e701889da649",
+        "platform": "XiaoHongShu",
+        "account": "炤见AI出海",
+        "title": "Claude又送重置卡，新号结果出来了",
+        "desc": null,
+        "cover": "http://sns-na-i4.xhscdn.com/spectrum/1040g34o327ljdkvt6c0049kavkni19i9cqg8u28?<查询串去掉>",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "published",
+        "statusText": "已发布",
+        "status": "1",
+        "postTime": "2026-11-17 11:57:18",
+        "timing": null,
+        "url": "https://www.xiaohongshu.com/explore/6afbd09e00000000250132bd",
+        "show": 3145,
+        "view": 1224,
+        "like": 5,
+        "comment": 3,
+        "favorite": 3,
+        "forward": 0,
+        "fansAdd": 0,
+        "viewTime": 20,
+        "coverClickRate": 0.272,
+        "danmu": 0,
+        "permission": {
+          "code": 0,
+          "msg": "",
+          "tab": 1
+        },
+        "platformName": "小红书"
+      },
+      {
+        "postId": "6afb4790000000002b03b5c3",
+        "uid": "5944af205e87e701889da649",
+        "platform": "XiaoHongShu",
+        "account": "炤见AI出海",
+        "title": "Grok Bot怎么用？零基础搭AI员工",
+        "desc": null,
+        "cover": "http://sns-na-i4.xhscdn.com/spectrum/1040g34o327l2hln96a1049kavkni19i9ro1pd2g?<查询串去掉>",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "published",
+        "statusText": "已发布",
+        "status": "1",
+        "postTime": "2026-11-17 02:12:32",
+        "timing": null,
+        "url": "https://www.xiaohongshu.com/explore/6afb4790000000002b03b5c3",
+        "show": 2,
+        "view": 0,
+        "like": 0,
+        "comment": 0,
+        "favorite": 0,
+        "forward": 0,
+        "fansAdd": 0,
+        "viewTime": 0,
+        "coverClickRate": 1,
+        "danmu": 0,
+        "permission": {
+          "code": 0,
+          "msg": "",
+          "tab": 1
+        },
+        "platformName": "小红书"
+      }
+    ],
+    "account": {
+      "uid": "5944af205e87e701889da649",
+      "loginStatus": "登录有效",
+      "fans": 2568,
+      "updateTime": "2026-11-19 14:26:09",
+      "daily": [
+        {
+          "date": "2026-11-16",
+          "fansTotal": 2556,
+          "fansNet": 3,
+          "fansRise": 3,
+          "fansLeave": 0
+        },
+        {
+          "date": "2026-11-17",
+          "fansTotal": 2567,
+          "fansNet": 11,
+          "fansRise": 11,
+          "fansLeave": 0
+        }
+      ]
+    }
+  }
+}

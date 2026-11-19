@@ -20,7 +20,9 @@ const CHECKS = {
     const code = r.json?.code;
     const d = r.json?.data ?? {};
     const atLogin = /\/login/.test(await page.url());
-    return { state: code === 0 || r.json?.success === true ? 'ok' : code === -100 || r.status === 401 || atLogin ? 'out' : 'unknown', evidence: `GET /api/galaxy/creator/home/personal_info http=${r.status} code=${code} success=${r.json?.success}；页面${atLogin ? '跳到 /login' : '没跳登录页'}`, uidSeen: d.user_id ?? d.userId ?? d.red_id, raw: r.json, loginUrl: 'https://creator.xiaohongshu.com/login' };
+    // personal_info 里没有 userId；user/info 的 data.userId 才是（2026-11-19）
+    const ui = await getJson(page, '/api/galaxy/user/info');
+    return { state: code === 0 || r.json?.success === true ? 'ok' : code === -100 || r.status === 401 || atLogin ? 'out' : 'unknown', evidence: `GET /api/galaxy/creator/home/personal_info http=${r.status} code=${code} success=${r.json?.success}；页面${atLogin ? '跳到 /login' : '没跳登录页'}`, uidSeen: ui.json?.data?.userId ?? d.user_id ?? d.userId ?? null, raw: r.json, loginUrl: 'https://creator.xiaohongshu.com/login' };
   },
   async Bili(page) {
     const r = await getJson(page, 'https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });

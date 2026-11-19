@@ -1,6 +1,6 @@
-# 00 Profile 5 平台 space 与登录状态（2026-11-18）
+# 00 Profile 5 平台 space 与登录状态（2026-11-19 更新）
 
-**判定：通过（10 个 space 已建好、可重复跑）。登录状态：2 个已登录，7 个等扫码，1 个不确定。**
+**判定：通过。** 10 个「平台×账号」space 都在 Profile 5，可以按名字重复找到；8 个已登录，Instagram 未登录（停在账号安全验证页），知识站没有后台地址。
 
 ## 怎么测
 
@@ -11,46 +11,36 @@ spikes/platform/run.sh spikes/platform/spaces.mjs '{"handoff":true,"only":[...]}
 ```
 
 - `run.sh` 在脚本前面加两个全局变量（`SPIKE_ROOT`、`ARGS`），再交给 `ego-browser nodejs`。ego 的 Node 进程读不到 shell 的 cwd 和环境变量。
-- 幂等：先 `listTaskSpaces()` 按名字找，有就 `taskSpace(id)` 复用，没有才 `taskSpace(name, { profileId: "Profile 5" })`。第二次跑全部显示 `created: false`，space 数量不变。
-- 同名 space 如果不在 Profile 5，脚本会抛错，不会去用它。交给用户的 space（`agentDelegatedToUser`）不会被抢回；复测脚本要加 `{"takeOver":true}` 才会收回。
-- 没有调用 `finish()`。这些 space 是长期的，每个 space 的 `p1` 都留着。
-- 打开页面时用 `waitUntil: "commit"`，再固定等 6 秒。抖音后台是长轮询 SPA，等 `domcontentloaded` 会 30 秒超时（第一次跑就是这么失败的）。
+- 幂等：先 `listTaskSpaces()` 按名字找，有就 `taskSpace(id)` 复用，没有才 `taskSpace(name, { profileId: "Profile 5" })`。
+- 同名 space 如果不在 Profile 5，脚本会抛错。交给用户的 space（`agentDelegatedToUser`）不会被抢回；复测脚本要加 `{"takeOver":true}` 才会收回。
+- 不调用 `finish()`，这些 space 是长期的。
+- 打开页面用 `waitUntil: "commit"` 再固定等 6 秒（抖音后台等 `domcontentloaded` 会超时）。
+- 11-19 改了小红书的 uid 判断：`personal_info` 里没有 userId，改读 `/api/galaxy/user/info` 的 `data.userId`，现在能判「一致」。
 
-## space 表
+## space 表（2026-11-19 15:00 左右）
 
-| platformCode | spaceName | spaceId | 登录状态 | 当前控制方 | 证据 |
-|---|---|---|---|---|---|
-| Douyin | kinso/Douyin/106707338905 | 66 | 已登录 | agent | `GET /web/api/media/user/info/` http 200，`status_code=0`，`user.uid` 与登记一致 |
-| XiaoHongShu | kinso/XiaoHongShu/5944af205e87e701889da649 | 67 | 未登录 → 等扫码 | 用户（handOff） | `GET /api/galaxy/creator/home/personal_info` http 401，`code=-1`；页面跳到 `/login?redirectReason=401` |
-| Bili | kinso/Bili/478358005 | 68 | 未登录 → 等扫码 | 用户（handOff） | `GET api.bilibili.com/x/web-interface/nav`（credentials: include）`code=-101`，`isLogin=false` |
-| GongZhongHao | kinso/GongZhongHao/gh_eb2c407bc687 | 69 | 未登录 → 等扫码 | 用户（handOff） | 打开 `mp.weixin.qq.com` 后落地 URL 不带 `token` 参数 |
-| Weibo | kinso/Weibo/2272770294 | 73 | 未登录 → 等扫码 | 用户（handOff） | 跳到 `weibo.com/newlogin`；`/ajax/profile/info` 能返回 `ok=1`，但未登录也能返回，所以不能单靠它判断 |
-| Channels | kinso/Channels/pending | 80 | 未登录 → 等扫码 | 用户（handOff） | `POST /cgi-bin/mmfinderassistant-bin/auth/auth_data` 返回 `errCode=300330`，没有 `finderUser`；页面在 `/login.html` |
-| X | kinso/X/pending | 90 | 已登录 | agent | `/home` 侧栏有账号按钮，handle 为 `@kinsolee79`（uid 待登记） |
-| YouTube | kinso/YouTube/pending | 91 | 未登录 → 等扫码 | 用户（handOff） | `studio.youtube.com` 跳到 `accounts.google.com/v3/signin/accountchooser` |
-| Instagram | kinso/Instagram/pending | 92 | 未登录 → 等扫码 | 用户（handOff） | 页面显示「Continue / Use another profile」，会话已过期，只记住了账号。没有点 Continue |
-| Zhishi | kinso/Zhishi/pending | 101 | 不确定 | agent | 麦田 `config.json` 没配置 `site.admin`（知识站后台地址），只建了 space，没打开页面 |
+| platformCode | spaceName | spaceId | 登录状态 | 证据 |
+|---|---|---|---|---|
+| Douyin | kinso/Douyin/106707338905 | 183 | 已登录，uid 一致 | `GET /web/api/media/user/info/` http 200，`status_code=0` |
+| XiaoHongShu | kinso/XiaoHongShu/5944af205e87e701889da649 | 184 | 已登录，uid 一致 | `personal_info` `code=0`；`user/info` 的 `userId` 与登记一致 |
+| Bili | kinso/Bili/478358005 | 185 | 已登录，uid 一致 | `api.bilibili.com/x/web-interface/nav` `code=0`、`isLogin=true`、`mid` 一致 |
+| GongZhongHao | kinso/GongZhongHao/gh_eb2c407bc687 | **191**（原 170） | 已登录 | 05 时间线里 `/cgi-bin/home?...&f=json` 的 `base_resp.ret=0`，落地 URL 带 token |
+| Weibo | kinso/Weibo/2272770294 | **192**（原 186） | 已登录，uid 一致 | 落地 `weibo.com`，页面配置里自己的 uid 与登记一致 |
+| Channels | kinso/Channels/pending | 172 | 已登录 | `auth_data` `errCode=0`，有 `finderUser`。名字里的 uid 还是 `pending`；下游认的视频号 uid 是 `finderUser.uniqId`（见 06） |
+| X | kinso/X/pending | 187 | 已登录 | `/home` 侧栏账号按钮，handle `@kinsolee79` |
+| YouTube | kinso/YouTube/pending | 188 | 已登录 | `studio.youtube.com` 落地到 `/channel/<UC…>` |
+| Instagram | kinso/Instagram/pending | 189 | **未登录** | 页面停在 `instagram.com/auth_platform/challengepicker/`（账号安全验证），既没有登录表单也没有侧栏头像，脚本判 `unknown` |
+| Zhishi | kinso/Zhishi/pending | **193**（原 190） | 不适用 | 麦田 `config.json` 没配 `site.admin`，只建了 space |
 
-所有 space 都在 Profile 5（`listTaskSpaces()` 返回的 `profileId` 字段）。没有用 Profile 6，没有建 profile，没有碰别人的 space（63、64 是原来就有的测试 space）。
-
-## 需要负责人扫码
-
-在 Ego Lite 里切到对应的 space（已经停在登录页，控制权在你手上）扫码登录：
-
-- 小红书（67）
-- B站（68）
-- 公众号（69）
-- 微博（73）
-- 视频号（80）
-- YouTube（91）
-- Instagram（92）
-
-另外，知识站（101）需要先在 `config.json` 里配置 `site.admin`，或者告诉我后台地址。
-
-扫完码后复测登录：`spikes/platform/run.sh spikes/platform/spaces.mjs`。交给用户的 space 会显示 `awaiting_user`；要收回控制，在复测脚本里加 `{"takeOver":true}`（见 05/06/07）。
+所有 space 都在 Profile 5，没有用 Profile 6，没有建 profile。165 是用户自己的 space，没碰。
 
 ## 观察
 
-- Profile 5 的国内平台大多没有登录态。PLAN §2.2 假设这些账号已经登在 Ego Lite 里，实际只有抖音和 X 在 Profile 5 里登录。
-- 视频号和公众号没登录时，cookie 已经分在不同域名下，见 05。
-- 微博的 `/ajax/profile/info?uid=` 不能用来判断登录（未登录也返回 `ok=1`）。改用两个信号：落地 URL 是否跳到 `newlogin`/`passport`，以及页面配置里有没有自己的 uid。
+- **space id 会变。** 11-18 的 66–101 到 11-19 早上已经不在，协调者重建成 170–190。11-19 下午 Orca 重启前后，170（公众号）、186（微博）、190（知识站）又不见了，脚本按名字重建成 191、192、193。消失的这三个都是当天没被脚本用过的 space，用过的（172、183–189）都还在。原因没确认（可能是 Ego 回收闲置 space）。**S3 要按名字找 space，不能写死 id**；登录态是 profile 级的 cookie，重建 space 不用重新扫码（191 新建后公众号直接就是已登录）。
+- 小红书创作者中心和主站 `www.xiaohongshu.com` 共用登录态，同一个 space 两边都能用（07 的评论和私信在主站）。
+- 微博 `/ajax/profile/info?uid=` 不能单独判断登录（未登录也返回 `ok=1`），要结合落地 URL 和页面配置里的自己 uid。
+
+## 需要负责人处理
+
+- **Instagram（189）**：账号停在 Instagram 的安全验证页（challengepicker），要本人在 Ego Lite 里切到这个 space 完成验证或重新登录。我没有动它。
+- 知识站（193）：要在 `config.json` 配 `site.admin`，或告诉我后台地址。

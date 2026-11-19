@@ -1,0 +1,421 @@
+{
+  "note": "B站 /x/web/archives + archive_diagnose/compare + fans/stat 的脱敏样例。raw 只留 1 条；mapped 是按目标格式映射后的结果",
+  "request": {
+    "archives": "/x/web/archives?status=is_pubing,pubed,not_pubed&pn=<n>&ps=20&coop=1&interactive=1",
+    "compare": "/x/web/data/archive_diagnose/compare?size=30",
+    "fansGraph": "/x/web/data/v2/fans/stat/graph?type=all_fans&period=1",
+    "fansNum": "/x/web/data/v2/fans/stat/num?period=1",
+    "host": "https://member.bilibili.com（页面同源 fetch）"
+  },
+  "raw": {
+    "archives": {
+      "code": 0,
+      "data": {
+        "class": {
+          "pubed": 16,
+          "not_pubed": 0,
+          "is_pubing": 0
+        },
+        "page": {
+          "pn": 1,
+          "ps": 20,
+          "count": 16
+        },
+        "arc_audits": [
+          {
+            "Archive": {
+              "aid": 117629759196249,
+              "bvid": "BV1iBsg6sEjz",
+              "mid": 478358005,
+              "tid": 231,
+              "tp_info": null,
+              "title": "Claude又送了一张重置卡，昨天开的新号结果出来了｜Claude和Codex哪个好用？Codex还有什么优势",
+              "author": "",
+              "cover": "http://i2.hdslb.com/bfs/archive/ae66ce9e8340f0b164f815a30f0f4f3160ee3d77.jpg",
+              "reject_reason": "",
+              "reject_reason_url": "",
+              "modify_advise": "",
+              "problem_description": "",
+              "problem_description_title": "",
+              "reject_reason_id": 0,
+              "picture_data": null,
+              "reject_video_explain": null,
+              "tag": "Claude,Claude重置卡,Claude和Codex,Codex,Claude Ultra,AI编程,AI工具",
+              "duration": 69,
+              "audit_version": 2000000000,
+              "copyright": 1,
+              "no_reprint": 1,
+              "ugcpay": 0,
+              "order_id": 0,
+              "order_name": "",
+              "adorder_id": 0,
+              "adorder_name": "",
+              "adorder_no": "",
+              "adorder_state": null,
+              "online_time": 0,
+              "desc": "一睡醒，Claude 又给我发了一张重置卡。昨天说的那个新号我也去搞了，结果跟我想的不太一样，后面再给大家验证一下。说个题外话，它这么一直送，你这个 Codex 还有什么优势？",
+              "mission_id": 0,
+              "mission_name": "",
+              "forward": 0,
+              "attribute": 0,
+              "state": 0,
+              "primary_region": "cn",
+              "primary_state": 0,
+              "is_interoperable": true,
+              "is_primary_oversea": false,
+              "is_from_white_version": false,
+              "is_white_owned": false,
+              "is_cross_end": false,
+              "state_desc": "开放浏览",
+              "state_descv3": {
+                "aegis_tag": 0,
+                "xcode_tag": 0,
+                "submit_tag": "",
+                "delay_tag": 0,
+                "state_tag": ""
+              },
+              "state_panel": 0,
+              "source": "",
+              "desc_format_id": 9999,
+              "attrs": {
+                "is_coop": 0,
+                "is_owner": 1,
+                "is_dynamic": 0,
+                "is_360": 0,
+                "no_public": 0,
+                "live": 0,
+                "is_premiere": 0,
+                "is_played": 0,
+                "is_playlet": 0
+              },
+              "porder": null,
+              "dynamic": "",
+              "poi_object": null,
+              "dtime": 0,
+              "ptime": 1794887789,
+              "ctime": 1794887769,
+              "ugcpay_info": null,
+              "staffs": null,
+              "vote": null,
+              "activity": null,
+              "interactive": 0,
+              "hl": null,
+              "no_background": 0,
+              "dynamic_video": 0,
+              "no_public": 0,
+              "is_360": 0,
+              "bs_editor": 0,
+              "up_from": 0,
+              "desc_v2": null,
+              "dynamic_v2": null,
+              "limit_state": false,
+              "appeal": "",
+              "appeal_state": 0,
+              "premiere": 0,
+              "is_ugcpay_v2": 0,
+              "political_media": 0,
+              "political_editable": 0,
+              "charging_pay": 0,
+              "charge_2_free": 0,
+              "music_tort": "",
+              "is_only_self": 0,
+              "is_playlet": 0,
+              "is_staff": 0,
+              "is_once_audit_vip": 0,
+              "is_once_aduit_gray": 1,
+              "limited_free": false,
+              "limited_open": 0,
+              "had_passed": false,
+              "has_porder": 0,
+              "ArcXcodeState": 2,
+              "ArcAegisState": 2,
+              "is_ab_cover": 0,
+              "ab_cover_info": null
+            },
+            "Videos": [],
+            "stat": {
+              "aid": 117629759196249,
+              "view": 2291,
+              "danmaku": 0,
+              "reply": 8,
+              "favorite": 7,
+              "coin": 0,
+              "share": 0,
+              "now_rank": 0,
+              "his_rank": 0,
+              "like": 16,
+              "dislike": 0,
+              "vt": 0,
+              "vv": 2291,
+              "fav_g": 0,
+              "like_g": 0
+            },
+            "state_panel": 0,
+            "parent_tname": "科技",
+            "typename": "计算机技术",
+            "open_appeal": 0,
+            "appeal": {
+              "open_apid": 0,
+              "reject": "",
+              "jump_url": ""
+            },
+            "fast_pub": null,
+            "captions_count": 1,
+            "ai_captions_count": 1,
+            "activity": null,
+            "app_rules": null,
+            "web_rules": {
+              "more_oper": [
+                {
+                  "id": 8,
+                  "icon": "http://i0.hdslb.com/bfs/archive/045226630c7a03db0da5ecd9049f499d90fce925.png",
+                  "name": "必火推广",
+                  "type": 8,
+                  "url": "https://member.bilibili.com/platform/growingUp/fly?<查询串去掉>",
+                  "disabled": 0,
+                  "disable_reason": ""
+                }
+              ],
+              "out_oper": null
+            },
+            "hl": null,
+            "honors": null,
+            "notify_icons": null,
+            "bs_editor": [],
+            "copyright": null,
+            "display_fields": [
+              {
+                "name": "view",
+                "desc": "播放",
+                "value": 2291,
+                "icon_url": {
+                  "normal": "https://s1.hdslb.com/bfs/templar/york-static/qAnTDC0DSpuds9Rv.png",
+                  "night": "https://s1.hdslb.com/bfs/templar/york-static/qAnTDC0DSpuds9Rv.png"
+                }
+              }
+            ],
+            "problem_detail": null,
+            "cid_list": [
+              43672732039
+            ],
+            "ai_chapter_tips": []
+          }
+        ]
+      }
+    },
+    "compare": {
+      "code": 0,
+      "message": "OK",
+      "ttl": 1,
+      "data": {
+        "list": [
+          {
+            "aid": 117629759196249,
+            "bvid": "BV1iBsg6sEjz",
+            "cover": "http://i2.hdslb.com/bfs/archive/ae66ce9e8340f0b164f815a30f0f4f3160ee3d77.jpg",
+            "title": "Claude又送了一张重置卡，昨天开的新号结果出来了｜Claude和Codex哪个好用？Codex还有什么优势",
+            "pubtime": 1794887789,
+            "duration": 69,
+            "stat": {
+              "not_ready_field": [],
+              "play": 2291,
+              "vt": 0,
+              "full_play_ratio": 3856,
+              "play_viewer_rate": 9769,
+              "play_viewer_rate_med": 10000,
+              "play_fan_rate": 3737,
+              "play_fan_rate_med": 0,
+              "active_fans_rate": 3737,
+              "active_fans_med": 0,
+              "tm_rate": 503,
+              "tm_rate_med": 94,
+              "tm_fan_simi_rate_med": 0,
+              "tm_viewer_simi_rate_med": 82,
+              "tm_fan_rate": 864,
+              "tm_viewer_rate": 499,
+              "tm_pass_rate": 9842,
+              "tm_fan_pass_rate": 9872,
+              "tm_viewer_pass_rate": 9847,
+              "crash_rate": 1883,
+              "crash_rate_med": 3170,
+              "crash_fan_simi_rate_med": 0,
+              "crash_viewer_simi_rate_med": 3125,
+              "crash_fan_rate": 2549,
+              "crash_viewer_rate": 1866,
+              "interact_rate": 132,
+              "interact_rate_med": 0,
+              "interact_fan_simi_rate_med": 0,
+              "interact_viewer_simi_rate_med": 0,
+              "interact_fan_rate": 416,
+              "interact_viewer_rate": 163,
+              "avg_play_time": 0,
+              "avg_play_time_int": 0,
+              "total_new_attention_cnt": 2,
+              "play_trans_fan_rate": 9,
+              "play_trans_fan_rate_med": 0,
+              "like": 16,
+              "comment": 8,
+              "dm": 0,
+              "fav": 7,
+              "coin": 0,
+              "share": 0,
+              "unfollow": 0,
+              "tm_star": 50,
+              "tm_viewer_star": 50,
+              "tm_fan_star": 50,
+              "crash_p50": 2735,
+              "crash_viewer_p50": 2548,
+              "crash_fan_p50": 2481,
+              "interact_p50": 480,
+              "interact_viewer_p50": 427,
+              "interact_fan_p50": 1497,
+              "play_trans_fan_p50": 9
+            },
+            "is_only_self": false,
+            "hour_stat": {
+              "not_ready_field": [],
+              "play": 2173,
+              "vt": 0,
+              "like": 16,
+              "comment": 7,
+              "dm": 0,
+              "fav": 6,
+              "coin": 0,
+              "share": 0,
+              "tm_pass_rate": 9842,
+              "interact_rate": 132,
+              "tm_star": 50
+            }
+          }
+        ]
+      }
+    },
+    "fansGraph": {
+      "code": 0,
+      "message": "OK",
+      "ttl": 1,
+      "data": {
+        "tendency": [
+          {
+            "date_key": 1792425600,
+            "total_inc": 0
+          },
+          {
+            "date_key": 1792512000,
+            "total_inc": 0
+          }
+        ],
+        "data_tendency": {
+          "all_fans": [
+            {
+              "date_key": 1792425600,
+              "total_inc": 0
+            },
+            {
+              "date_key": 1792512000,
+              "total_inc": 0
+            }
+          ]
+        }
+      }
+    },
+    "fansNum": {
+      "code": 0,
+      "message": "OK",
+      "ttl": 1,
+      "data": {
+        "follow": 97,
+        "follow_last": 0,
+        "unfollow": 3,
+        "unfollow_last": 0,
+        "all_fans_acc": 101,
+        "all_fans": 101,
+        "interact_fans": 97,
+        "interact_fans_per": 9797,
+        "interact_pass_per": 9918,
+        "over_peer_percent": 9082,
+        "log_date": 20261118
+      }
+    }
+  },
+  "mapped": {
+    "posts": [
+      {
+        "postId": "BV1iBsg6sEjz",
+        "uid": "478358005",
+        "platform": "Bili",
+        "account": "Kinsolee",
+        "title": "Claude又送了一张重置卡，昨天开的新号结果出来了｜Claude和Codex哪个好用？Codex还有什么优势",
+        "desc": "一睡醒，Claude 又给我发了一张重置卡。昨天说的那个新号我也去搞了，结果跟我想的不太一样，后面再给大家验证一下。说个题外话，它这么一直送，你这个 Codex 还有什么优势？",
+        "cover": "http://i2.hdslb.com/bfs/archive/ae66ce9e8340f0b164f815a30f0f4f3160ee3d77.jpg",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "published",
+        "statusText": "已发布",
+        "status": "0",
+        "postTime": "2026-11-17 11:56:29",
+        "timing": null,
+        "url": "https://www.bilibili.com/video/BV1iBsg6sEjz",
+        "view": 2291,
+        "like": 16,
+        "comment": 8,
+        "favorite": 7,
+        "forward": 0,
+        "coin": 0,
+        "danmu": 0,
+        "fansAdd": 2,
+        "fansDrop": 0,
+        "playProgress": 38.56,
+        "viewTime": 27,
+        "platformName": "哔哩哔哩"
+      },
+      {
+        "postId": "BV1ABsT6oEYQ",
+        "uid": "478358005",
+        "platform": "Bili",
+        "account": "Kinsolee",
+        "title": "Grok Bot 使用教程｜零基础搭一支 AI 员工团队，关机了还在干活，从下载付款到定时开工全流程",
+        "desc": "凌晨一点你在睡觉，你的 AI 团队还在干活，电脑也可以是关着的。\n这期从下载、付款讲到怎么搭团队、怎么让它们到点自己开工，还有怎么放心让它们碰你的邮箱。最后是我用下来的三点感受，第三点很多人是开通了才知道。\n不懂技术、想搭 AI 员工的，可以从头跟着做。\n素材出处：Gary Chen（YouTube）https://www.youtube.com/watch?<查询串去掉> ，另有 xAI、Anthropic、OpenAI、Apple 官方片段和截图。\n配乐：lemo-opuscar",
+        "cover": "http://i2.hdslb.com/bfs/archive/a15cc6aafbd1fcdf45bb8df03d522c7b78167e04.jpg",
+        "postType": "视频",
+        "postTypeCode": "1",
+        "publishStatus": "published",
+        "statusText": "已发布",
+        "status": "0",
+        "postTime": "2026-11-17 02:06:22",
+        "timing": null,
+        "url": "https://www.bilibili.com/video/BV1ABsT6oEYQ",
+        "view": 229,
+        "like": 3,
+        "comment": 0,
+        "favorite": 8,
+        "forward": 0,
+        "coin": 0,
+        "danmu": 0,
+        "fansAdd": 2,
+        "fansDrop": 0,
+        "playProgress": 21.24,
+        "viewTime": 270,
+        "platformName": "哔哩哔哩"
+      }
+    ],
+    "account": {
+      "uid": "478358005",
+      "loginStatus": "登录有效",
+      "fans": 101,
+      "updateTime": "2026-11-19 14:26:35",
+      "daily": [
+        {
+          "date": "2026-11-17",
+          "fansTotal": 96,
+          "fansNet": 8
+        },
+        {
+          "date": "2026-11-18",
+          "fansTotal": 99,
+          "fansNet": 3
+        }
+      ]
+    }
+  }
+}
