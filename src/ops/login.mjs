@@ -42,16 +42,30 @@ export function exitCodeOf(rows) {
 const loadRunner = async () => (await import('../ego-runner/index.mjs')).runEgoTask;
 
 // 默认通知：feishu.mjs 在没有 config.json 时会 process.exit，所以先看配置在不在，再动态 import。
-// 返回 true 才算发出（没配置、没配飞书 webhook 返回 false，不记节流时间）。
-// quiet：feishu.mjs 不往 stdout 打「[飞书] …」（--json 的 stdout 要保持合法 JSON），日志自己写 stderr。
+// 不用 feishu.mjs 的 notify：它吞掉失败、不返回结果。这里照它的消息体自己发（先卡片，飞书返回 code 非 0 时退回纯文字），
+// 只有真的发出（HTTP 2xx 且 code 为 0 或没有 code）才返回 true，节流时间才会记。
+// stdout 不写任何东西（--json 的 stdout 要保持合法 JSON），日志只写 stderr，不打印 webhook 地址。
+async function postFeishu(webhook, body) {
+  let res;
+  try {
+    res = await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+  } catch (e) { return { sent: false, why: e.name === 'TimeoutError' ? '超过 10 秒没响应' : `连不上（${e.cause?.code ?? e.name}）` }; }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) return { sent: false, why: `HTTP ${res.status}` };
+  if (j.code != null && j.code !== 0) return { sent: false, rejected: true, why: `飞书返回 code=${j.code}${j.msg ? ` ${String(j.msg).slice(0, 80)}` : ''}` };
+  return { sent: true };
+}
+
 export async function defaultNotify(text) {
   const head = String(text).split('\n')[0];
   const cfg = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
   if (!fs.existsSync(cfg)) { console.error(`没有 ${cfg}，飞书提醒没发：${head}`); return false; }
-  const { config, notify } = await import('../feishu.mjs');
+  const { config, toCard } = await import('../feishu.mjs');
   if (!config.feishuWebhook) { console.error(`config.json 没配 feishuWebhook，飞书提醒没发：${head}`); return false; }
-  console.error(`[飞书] ${head}`);
-  await notify(text, { quiet: true });
+  let r = await postFeishu(config.feishuWebhook, { msg_type: 'interactive', card: toCard(text) });
+  if (r.rejected) r = await postFeishu(config.feishuWebhook, { msg_type: 'text', content: { text } });
+  if (!r.sent) { console.error(`飞书提醒没发出（${r.why}）：${head}`); return false; }
+  console.error(`[飞书] 已发：${head}`);
   return true;
 }
 

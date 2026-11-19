@@ -74,19 +74,80 @@ describe('默认飞书提醒（defaultNotify）', () => {
     `const { defaultNotify } = await import(${JSON.stringify(LOGIN)}); console.error('RET=' + await defaultNotify('❌ 抖音账号掉线 | Douyin:1\\n详情'));`],
     { env: { ...process.env, ...env } });
 
-  test('发出时 stdout 不出现任何内容（--json 的 stdout 保持合法 JSON），返回 true', async () => {
-    const got = [];
-    const server = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { got.push(b); res.end('{"code":0}'); }); });
+  // 假飞书 webhook：按队列逐次回应（'ok' → code 0，'reject' → code 19001，'500' → HTTP 500，'nocode' → 200 空对象）
+  async function fakeFeishu() {
+    const queue = [], got = [];
+    const server = http.createServer((req, res) => {
+      let b = ''; req.on('data', (d) => { b += d; });
+      req.on('end', () => {
+        got.push(JSON.parse(b).msg_type);
+        const m = queue.shift() ?? 'ok';
+        if (m === '500') { res.statusCode = 500; return res.end('{"code":0}'); }
+        res.end(m === 'reject' ? '{"code":19001,"msg":"bad"}' : m === 'nocode' ? '{}' : '{"code":0}');
+      });
+    });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
-    try {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-notify-'));
-      const cfg = path.join(dir, 'config.json');
-      fs.writeFileSync(cfg, JSON.stringify({ feishuWebhook: `http://127.0.0.1:${server.address().port}/hook`, rootPath: dir }));
-      const { stdout, stderr } = await run({ MAITIAN_CONFIG: cfg });
+    return { queue, got, url: `http://127.0.0.1:${server.address().port}/hook`, close: () => server.close() };
+  }
+  const cfgFor = (webhook) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-notify-'));
+    const cfg = path.join(dir, 'config.json');
+    fs.writeFileSync(cfg, JSON.stringify({ feishuWebhook: webhook, rootPath: dir }));
+    return cfg;
+  };
+
+  for (const [label, replies, sent, types] of [
+    ['code 0', ['ok'], true, ['interactive']],
+    ['没有 code 字段的 2xx', ['nocode'], true, ['interactive']],
+    ['卡片被拒、文字发出', ['reject', 'ok'], true, ['interactive', 'text']],
+    ['卡片和文字都被拒（code 非 0）', ['reject', 'reject'], false, ['interactive', 'text']],
+    ['HTTP 500', ['500'], false, ['interactive']],
+  ]) {
+    test(`${label}：返回 ${sent}，stdout 为空，不打印 webhook 地址`, async () => {
+      const f = await fakeFeishu();
+      f.queue.push(...replies);
+      try {
+        const { stdout, stderr } = await run({ MAITIAN_CONFIG: cfgFor(f.url) });
+        assert.equal(stdout, '');
+        assert.match(stderr, new RegExp(`RET=${sent}`));
+        assert.deepEqual(f.got, types);
+        assert.ok(!stderr.includes(f.url));
+      } finally { f.close(); }
+    });
+  }
+
+  test('连不上的地址：返回 false，stdout 为空', async () => {
+    const url = 'http://127.0.0.1:1/hook';
+    const { stdout, stderr } = await run({ MAITIAN_CONFIG: cfgFor(url) });
+    assert.equal(stdout, '');
+    assert.match(stderr, /RET=false/);
+    assert.match(stderr, /没发出/);
+    assert.ok(!stderr.includes(url));
+  });
+
+  test('检测掉线：只有真发出那次写 alertSentAt，失败后下一次检测还会再发', async () => {
+    const CHECK = path.join(ROOT, 'test', 'fixtures', 'ops', 'notify-check.mjs');
+    const SEED = path.join(ROOT, 'src', 'ops', 'accounts.seed.json');
+    const db = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ops-notify-')), 'ops.db');
+    const f = await fakeFeishu();
+    const T0 = Date.parse('2026-11-19T00:00:00Z');
+    const check = async (cfg, at) => {
+      const { stdout, stderr } = await promisify(execFile)(process.execPath, [CHECK, db, SEED, String(at)], { env: { ...process.env, MAITIAN_CONFIG: cfg } });
       assert.equal(stdout, '');
-      assert.match(stderr, /RET=true/);
-      assert.equal(got.length, 1);
-    } finally { server.close(); }
+      return JSON.parse(stderr.match(/^@@ALERT (.*)$/m)[1]);
+    };
+    try {
+      assert.equal(await check(cfgFor('http://127.0.0.1:1/hook'), T0), null);       // 连不上
+      f.queue.push('500');
+      assert.equal(await check(cfgFor(f.url), T0 + 60_000), null);                 // HTTP 500
+      f.queue.push('reject', 'reject');
+      assert.equal(await check(cfgFor(f.url), T0 + 120_000), null);                // code 非 0
+      f.queue.push('ok');
+      assert.equal(await check(cfgFor(f.url), T0 + 180_000), new Date(T0 + 180_000).toISOString());   // 真发出
+      assert.deepEqual(f.got, ['interactive', 'interactive', 'text', 'interactive']);
+      assert.equal(await check(cfgFor(f.url), T0 + 240_000), new Date(T0 + 180_000).toISOString());   // 6 小时内不再发
+      assert.equal(f.got.length, 4);
+    } finally { f.close(); }
   });
 
   test('没有 config.json、或没配 webhook：没发，返回 false，stdout 为空', async () => {
