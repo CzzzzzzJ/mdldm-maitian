@@ -2,7 +2,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +76,44 @@ describe('space 锁（不需要 Ego Lite）', () => {
     const held = tryLock(path, { pid: deadPid() });
     beat(held.lock, { stopped: true });
     assert.equal(tryLock(path, { staleMs: 60_000 }).ok, true);
+  });
+
+  test('判定过期之后、接管之前旧脚本刚写了心跳：接管失败，旧锁原样保留', async () => {
+    const path = spaceLockPath(freshDir(), 'kinso/test/a');
+    const held = tryLock(path, { pid: deadPid() });
+    await sleep(150);
+    let hookCalled = false;
+    const r = tryLock(path, { staleMs: 100, onStale: () => { hookCalled = true; beat(held.lock); } });
+    assert.equal(hookCalled, true, '应走到了「已判定过期、准备接管」这一步');
+    assert.equal(r.ok, false);
+    assert.equal(readLock(path).token, held.lock.token);
+  });
+
+  test('锁文件是坏 JSON（半写）：按新鲜处理，不能接管', async () => {
+    const path = spaceLockPath(freshDir(), 'kinso/test/a');
+    writeFileSync(path, '{"token":"x","pid":');
+    utimesSync(path, new Date(0), new Date(0));
+    const r = tryLock(path, { staleMs: 1 });
+    assert.equal(r.ok, false);
+    assert.equal(readFileSync(path, 'utf8'), '{"token":"x","pid":', '坏锁文件不应被删掉或覆盖');
+  });
+
+  test('心跳文件是坏 JSON（半写）：按新鲜处理，不能接管', async () => {
+    const path = spaceLockPath(freshDir(), 'kinso/test/a');
+    const held = tryLock(path, { pid: deadPid() });
+    await sleep(150);
+    writeFileSync(held.lock.heartbeatFile, '{"at":17');
+    const r = tryLock(path, { staleMs: 100 });
+    assert.equal(r.ok, false);
+    assert.equal(readLock(path).token, held.lock.token);
+  });
+
+  test('写心跳是原子的：不留临时文件，读方读到的总是完整 JSON', () => {
+    const dir = freshDir();
+    const held = tryLock(spaceLockPath(dir, 'kinso/test/a'));
+    for (let i = 0; i < 50; i++) beat(held.lock);
+    assert.deepEqual(JSON.parse(readFileSync(held.lock.heartbeatFile, 'utf8')).stopped, false);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
   });
 
   test('几个进程同时接管同一把过期锁：只有一个成功', async () => {

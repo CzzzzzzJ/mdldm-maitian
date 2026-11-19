@@ -6,6 +6,7 @@
 // 心跳单独写在 heartbeatFile（`<锁文件>.<token>.hb`，内容 `{ at, stopped }`）：
 // Ego 里的任务脚本只写这个文件、不碰锁文件，被接管后旧脚本再写也只写到它自己 token 的文件，影响不到新持有者。
 // 读锁时心跳时间取锁文件 heartbeatAt 和心跳文件 at 里较晚的那个。
+// 所有写都是「临时文件 + link/rename」，读方不会读到半写的内容；万一读到坏 JSON，按「心跳新鲜、不可接管」处理。
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -20,10 +21,20 @@ export const locksDir = (env = process.env) => join(env.MAITIAN_OPS_DIR || DEFAU
 export const spaceLockPath = (dir, space) => join(dir, `${encodeURIComponent(space)}.lock`);
 export const foregroundLockPath = (dir) => join(dir, FOREGROUND_LOCK);
 
+const CORRUPT = Symbol('corrupt');
 const readJson = (path) => {
-  try { return JSON.parse(readFileSync(path, 'utf8')); }
+  let text;
+  try { text = readFileSync(path, 'utf8'); }
   catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  try { return JSON.parse(text); } catch { return CORRUPT; }
 };
+
+/** 原子写：先写临时文件再 rename，读方要么读到旧内容、要么读到新内容。 */
+export function writeAtomic(path, text) {
+  const tmp = `${path}.${randomBytes(4).toString('hex')}.tmp`;
+  try { writeFileSync(tmp, text); renameSync(tmp, path); }
+  catch (e) { rmSync(tmp, { force: true }); throw e; }
+}
 
 export function pidAlive(pid) {
   if (!pid) return false;
@@ -31,11 +42,16 @@ export function pidAlive(pid) {
   catch (e) { return e.code === 'EPERM'; }
 }
 
-/** 读锁：不存在返回 null；心跳时间合并心跳文件。 */
+/**
+ * 读锁：不存在返回 null；心跳时间合并心跳文件。
+ * 锁文件或心跳文件读到坏 JSON 时心跳按「现在」算（不可接管）；坏的锁文件另带 corrupt:true，要人工删。
+ */
 export function readLock(path) {
   const lock = readJson(path);
   if (!lock) return null;
+  if (lock === CORRUPT) return { path, corrupt: true, token: null, pid: null, startedAt: null, heartbeatAt: Date.now(), stopped: false };
   const hb = lock.heartbeatFile ? readJson(lock.heartbeatFile) : null;
+  if (hb === CORRUPT) return { ...lock, path, heartbeatAt: Date.now(), stopped: false };
   return { ...lock, path, heartbeatAt: Math.max(lock.heartbeatAt, hb?.at ?? 0), stopped: !!hb?.stopped };
 }
 
@@ -44,6 +60,7 @@ export function readLock(path) {
  * 前台锁的持有者在 Ego 的常驻 Node 服务里，pid 总是活的，所以前台锁只看心跳。
  */
 export function isStale(holder, { staleMs, requireDeadPid = true, now = Date.now() }) {
+  if (holder.corrupt) return false;
   const quiet = holder.stopped || now - holder.heartbeatAt > staleMs;
   return quiet && (!requireDeadPid || !pidAlive(holder.pid));
 }
@@ -55,16 +72,17 @@ function create(path, { pid, meta }) {
   const now = Date.now();
   const lock = { token, pid, startedAt: now, heartbeatAt: now, heartbeatFile: `${path}.${token}.hb`, ...meta };
   const tmp = `${path}.${token}.tmp`;
-  writeFileSync(tmp, JSON.stringify(lock));
+  writeFileSync(tmp, JSON.stringify(lock));   // 临时文件只有自己知道，link 之后锁文件一出现就是完整内容
   try { linkSync(tmp, path); return { ...lock, path }; }
   catch (e) { if (e.code === 'EEXIST') return null; throw e; }
   finally { rmSync(tmp, { force: true }); }
 }
 
-// 接管：先独占一个保护文件，再确认锁还是刚才判定过期的那一把（token 相同），才删旧锁、建新锁。
+// 接管：先独占一个保护文件，再重读锁、重新做完整的过期判定（还是同一把、而且仍然过期），才删旧锁、建新锁。
+// 在保护文件外判定过期之后，旧脚本可能刚写了心跳，所以保护文件内必须重判，不能只比 token。
 // 两个进程同时接管时，抢不到保护文件的直接算没拿到；绕过保护文件直接建锁的，只能在旧锁删掉之后成功，
 // 这时接管方的 link 报 EEXIST，也只有一个成功。
-function takeover(path, holder, info) {
+function takeover(path, holder, info, staleOpts) {
   const guard = `${path}.takeover`;
   try { writeFileSync(guard, String(process.pid), { flag: 'wx' }); }
   catch (e) {
@@ -74,7 +92,7 @@ function takeover(path, holder, info) {
   }
   try {
     const now = readLock(path);
-    if (now && now.token !== holder.token) return null;
+    if (now && (now.token !== holder.token || !isStale(now, staleOpts))) return null;
     if (now) { rmSync(now.heartbeatFile, { force: true }); rmSync(path, { force: true }); }
     return create(path, info);
   } finally { rmSync(guard, { force: true }); }
@@ -83,18 +101,21 @@ function takeover(path, holder, info) {
 /**
  * 取锁，不等待。
  * @param {string} path 锁文件
- * @param {{ pid?: number|null, staleMs?: number, requireDeadPid?: boolean, meta?: object }} [opts]
+ * @param {{ pid?: number|null, staleMs?: number, requireDeadPid?: boolean, meta?: object, onStale?: Function }} [opts]
+ *   onStale：判定过期之后、接管之前调用（测试用，复现「判定后旧脚本又写了心跳」）
  * @returns {{ ok: true, lock: object } | { ok: false, holder: object }}
  */
-export function tryLock(path, { pid = process.pid, staleMs = 10_000, requireDeadPid = true, meta = {} } = {}) {
+export function tryLock(path, { pid = process.pid, staleMs = 10_000, requireDeadPid = true, meta = {}, onStale } = {}) {
   const info = { pid, meta };
+  const staleOpts = { staleMs, requireDeadPid };
   for (let attempt = 0; attempt < 3; attempt++) {
     const lock = create(path, info);
     if (lock) return { ok: true, lock };
     const holder = readLock(path);
     if (!holder) continue;   // 刚被释放，再试
-    if (!isStale(holder, { staleMs, requireDeadPid })) return { ok: false, holder };
-    const taken = takeover(path, holder, info);
+    if (!isStale(holder, staleOpts)) return { ok: false, holder };
+    onStale?.(holder);
+    const taken = takeover(path, holder, info, staleOpts);
     if (taken) return { ok: true, lock: taken };
     const now = readLock(path);
     if (now) return { ok: false, holder: now };
@@ -104,7 +125,7 @@ export function tryLock(path, { pid = process.pid, staleMs = 10_000, requireDead
 
 /** 写心跳（锁持有者或 Ego 里的任务脚本都可以写）；stopped=true 表示脚本已经停了。 */
 export function beat(lock, { stopped = false } = {}) {
-  writeFileSync(lock.heartbeatFile, JSON.stringify({ at: Date.now(), stopped }));
+  writeAtomic(lock.heartbeatFile, JSON.stringify({ at: Date.now(), stopped }));
 }
 
 const ownedBy = (lock) => readJson(lock.path)?.token === lock.token;
@@ -121,10 +142,8 @@ export function releaseLock(lock) {
  */
 export function orphanLock(lock) {
   if (!ownedBy(lock)) return;
-  const tmp = `${lock.path}.${lock.token}.tmp`;
   const { path: _p, stopped: _s, ...content } = readLock(lock.path);
-  writeFileSync(tmp, JSON.stringify({ ...content, pid: null, orphanedAt: Date.now() }));
-  renameSync(tmp, lock.path);
+  writeAtomic(lock.path, JSON.stringify({ ...content, pid: null, orphanedAt: Date.now() }));
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
