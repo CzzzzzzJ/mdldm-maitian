@@ -19,6 +19,8 @@ export const USAGE = `用法：hub ops <子命令>
   login --check [--platform <code>] [--json]   只读检测登录、核对 uid（--check 不接位置参数，平台用 --platform）
   login <platformCode|账号id>                  打开登录页交给负责人扫码，交还后自动检测一次（不接 --platform）
   tokens init                                  生成写入口令到仓库根目录 .env（已有的不动，不打印口令值）
+  engage sync --once [--platform <code>] [--kind comments|dms] [--force] [--json]   跑一轮评论私信抓取（退出码 0 跑完、1 参数错、5 已有一轮在跑）
+  engage status [--json]                       评论私信：每个平台每个 kind 最近一次抓取、未处理事件数
   collect [--days N] [platform ...] [--export] [--json]   只读采集近 N 天（默认 30）作品和粉丝（Douyin、XiaoHongShu、Bili、Channels）；--export 接着导出
   sync-followers [--json]                      把 ops.db 已有的粉丝分日同步进 hub.db 的 followers（不采集；collect 有平台 ok 后也会自动同步一次）
   export posts|accounts [--out 目录] [--date YYYYMMDD] [--max-age-hours N] [--json]   导出给下游的 posts-/accounts-YYYYMMDD.json
@@ -51,6 +53,7 @@ function printRows(rows) {
 // deps：测试注入假的 runTask / loadPlatform / moduleUrlOf / now（见 test/fixtures/ops-export/cli.mjs）
 export async function main(argv = process.argv.slice(2), deps = {}) {
   const [group, sub, ...rest] = argv;
+  if (group === 'engage') return (await import('../daemon/sync.mjs')).main(argv.slice(1));
   const { values, positionals } = parseArgs({ args: ['login', 'collect', 'sync-followers'].includes(group) ? argv.slice(1) : rest, allowPositionals: true, options: {
     json: { type: 'boolean', default: false }, check: { type: 'boolean', default: false }, platform: { type: 'string' }, help: { type: 'boolean', short: 'h', default: false },
     days: { type: 'string' }, export: { type: 'boolean', default: false }, out: { type: 'string' }, date: { type: 'string' }, 'max-age-hours': { type: 'string' },
