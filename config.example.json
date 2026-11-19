@@ -4,6 +4,7 @@
   "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
 
   "plugin": "store",
+  "platforms": ["bilibili", "douyin", "xhs", "channels", "youtube", "x", "instagram"],
   "bridge": "http://127.0.0.1:8765",
   "driver": "direct",
   "learnLinks": true,

@@ -162,6 +162,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 |---|---|
 | `plugin` | `store`（默认）：用专用 Chrome 里从应用商店装的麦田发布助手 |
 | `rootPath` / `nasUrl` | 发布工程根目录；NAS 掉线或被挂到「…-1」时守护进程会自己卸掉重挂 |
+| `platforms` | 可选。只用列出的平台，例如 `["douyin", "xhs", "channels", "x"]`；没列的平台不打开登录页、不做体检、不采粉丝，大屏也不显示。不填就是全部平台 |
 | `batches` | 上传批次。一次传太多平台会互相抢带宽导致超时，建议国内两两一批 |
 | `auto` / `manual` | 自动提交 / 等你点发布的平台 |
 | `keepAlive` | 容易掉登录的平台（视频号），定时刷一下保活 |
