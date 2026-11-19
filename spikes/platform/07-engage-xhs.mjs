@@ -40,7 +40,9 @@ const where = (sel) => page.evaluate((s) => {
 // —— 评论 ——
 await page.goto('https://www.xiaohongshu.com/notification', { waitUntil: 'commit', timeout: 30000 });
 await sleep(6000);
-await page.click('text="评论和@"', { label: 'open comments tab' });
+// 「评论和@」是默认标签；已选中时再点一次会让列表一直不出来（11-19 实测），所以只在没选中时点
+const commentsTabActive = await page.evaluate(() => /评论和@/.test(document.querySelector('[class*=tab][class*=active]')?.innerText ?? ''));
+if (!commentsTabActive) await page.click('text="评论和@"', { label: 'open comments tab' });
 // 列表渲染有时要 30 秒以上（接口 2 秒就回了，11-19 连跑几次都碰到），等回复入口出现再读
 await page.waitForSelector('.action-reply', { timeout: 60000 }).catch(() => {});
 await sleep(1500);
@@ -73,24 +75,26 @@ result.dm.count = cl.length;
 result.dm.keys = chats ? [...keyPaths(chats)].filter((k) => k.startsWith('data.chats[]')).slice(0, 40) : null;
 result.dm.sample = cl.slice(0, 3).map((c) => ({ peerUid: anon(c.chat_user_id), selfIsUserId: c.user_id === A.uid, peerNickname: anon(c.info?.nickname ?? c.nickname), lastMessage: clip(c.last_msg_content), lastAt: c.last_msg_time ? new Date(Number(c.last_msg_time)).toISOString() : null, unread: c.unread_count ?? c.info?.unread_count ?? null }));
 
-// 打开第一个会话（会标已读，任务允许），定位输入框，填入再清空
-const firstChat = await page.evaluate(() => {
-  const item = document.querySelector('.xhs-im-conv-item');
-  if (!item) return null;
-  item.setAttribute('data-spike', 'conv0');
-  return String(item.className).slice(0, 60);
-});
-result.dm.firstChatCls = firstChat;
-if (firstChat) {
-  await page.click('[data-spike=conv0]', { label: 'open first conversation' });
-  await page.waitForSelector('.xhs-im-input-bar-editor', { timeout: 40000 }).catch(() => {});
+// 依次打开前 3 个会话（会标已读，任务允许），找到有输入框的那个，填入再清空。
+// 官方号推送（如「[笔记] 📢…」）的会话没有输入框，要跳过
+result.dm.tried = [];
+for (let i = 0; i < 3 && !result.dm.fill; i++) {
+  const has = await page.evaluate((k) => {
+    const item = document.querySelectorAll('.xhs-im-conv-item')[k];
+    if (!item) return false;
+    item.setAttribute('data-spike', `conv${k}`);
+    return true;
+  }, i);
+  if (!has) break;
+  await page.click(`[data-spike=conv${i}]`, { label: 'open a conversation' });
+  await page.waitForSelector('.xhs-im-input-bar-editor', { timeout: 15000 }).catch(() => {});
   await sleep(1000);
   const n = await page.evaluate(() => {
     const c = [...document.querySelectorAll('[contenteditable=true], textarea')].filter((x) => x.getBoundingClientRect().height > 0 && !/search/i.test(x.className));
     if (c.length === 1) c[0].setAttribute('data-spike', 'dmbox');
     return { n: c.length, list: c.map((x) => `${x.tagName}.${String(x.className).slice(0, 40)}`) };
   });
-  result.dm.inputCandidates = n;
+  result.dm.tried.push({ index: i, inputCandidates: n });
   if (n.n === 1) { result.dm.inputBox = await where('[data-spike=dmbox]'); result.dm.fill = await fillAndClear('[data-spike=dmbox]'); }
 }
 

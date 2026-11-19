@@ -67,7 +67,10 @@ if (bothIn && args.minutes > 0) {
     await sleep(2000);
     const m = await readMp(i % 2 === 0);
     timeline.push({ step: `r${i} 公众号${i % 2 === 0 ? '（重开首页）' : ''}`, min: mins(), ...m });
-    console.log(JSON.stringify({ round: i, min: mins(), ch: c.loggedIn, mp: m.loggedIn }));
+    const line = JSON.stringify({ round: i, at: new Date().toISOString(), min: mins(), ch: c.loggedIn, chErr: c.errCode, mp: m.loggedIn, mpRet: m.home?.ret });
+    console.log(line);
+    // ego-browser nodejs 的 stdout 要进程结束才吐出来；进度另外追加到文件，进程被杀也留得下
+    await (await import('node:fs/promises')).appendFile(`${globalThis.SPIKE_ROOT}/scratch/05-progress.jsonl`, `${line}\n`);
   }
 } else if (bothIn) {
   await sleep(args.waitMin * 60_000);
