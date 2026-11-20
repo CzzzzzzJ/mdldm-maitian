@@ -40,7 +40,8 @@ const mapState = (s) => s === '待你发布' || s === '已填写' ? 'filled' : s
 const loadProject = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8'));
 const projectOf = (ep, pj) => ({ dir: path.relative(config.rootPath, ep.dir), data: pj });
 // 停用的平台：config.disabled（系统页里开关）。从登录、体检、保活、发布、采粉丝里都去掉
-export const DISABLED = new Set(config.disabled || []);
+// 每次现读 config.disabled：网页「系统 → 平台」改的是同一个 config 对象，守护进程不用重启就生效
+export const DISABLED = { has: (id) => (config.disabled || []).includes(id) };
 const ALL_IDS = ['bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram', 'zsz'];
 // 每次都重算：知识站可能在系统页停用（SITE 热更新），停用的平台由 config.disabled 决定
 const ALL = () => ALL_IDS.filter(id => (id !== 'zsz' || SITE) && !DISABLED.has(id));   // 没配自有站点就不管 zsz；停用的不管

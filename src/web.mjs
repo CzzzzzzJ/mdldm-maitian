@@ -189,7 +189,7 @@ async function handle(req, res) {
   if (u.pathname === '/api/integrations/feishu' && req.method === 'POST') {
     const a = await readJson(req), backup = snapConfig();
     try { applyFeishuPatch(config, { webhook: String(a.webhook ?? ''), login: a.login === true }); saveConfig(config); }
-    catch (e) { rollbackConfig(backup); return send(res, 500, { error: '写配置失败：' + e.message }); }
+    catch (e) { rollbackConfig(backup); return /先填 webhook/.test(e.message) ? send(res, 400, { error: e.message }) : send(res, 500, { error: '写配置失败：' + e.message }); }
     W = config.web || W;   // applyFeishuPatch 可能替换了 config.web 对象
     return send(res, 200, { feishu: integrations().feishu });
   }

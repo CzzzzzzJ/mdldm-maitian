@@ -6,7 +6,10 @@ import * as drv from './driver.mjs';
 
 // ---------- 飞书 ----------
 export function applyFeishuPatch(config, { webhook = '', login = false } = {}) {
-  config.feishuWebhook = String(webhook || '').trim();
+  const hook = String(webhook || '').trim();
+  // 飞书验证码登录靠 webhook 发码：没有 webhook 还开着登录，远程就再也登不进来
+  if (login && !hook) throw new Error('开启飞书验证码登录前先填 webhook');
+  config.feishuWebhook = hook;
   if (login) config.web = { ...(config.web || {}), login: 'feishu' };
   else if (config.web) delete config.web.login;
   return { webhook: config.feishuWebhook, login: !!(config.web && config.web.login === 'feishu') };

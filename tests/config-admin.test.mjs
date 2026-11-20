@@ -22,6 +22,11 @@ test('飞书 patch 只动飞书字段', () => {
   assert.equal('login' in config.web, false);
 });
 
+test('开着飞书登录不能清空 webhook', () => {
+  assert.throws(() => mod.applyFeishuPatch(config, { webhook: '', login: true }), /先填 webhook/);
+  assert.equal(config.feishuWebhook, 'https://new');   // 抛错前不改配置
+});
+
 test('知识站 patch 写 enabled 并保留字段', () => {
   const s = mod.applySitePatch(config, { enabled: true, name: '站', base: 'https://a.com/', dashboardApi: '/api/admin/dashboard' });
   assert.equal(s.enabled, true);
