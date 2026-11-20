@@ -39,6 +39,10 @@ function assertSent({ r, probe }, nativeId) {
   assert.equal(r.sendError, undefined);
   assert.equal(probe.sendClicks, 1);
 }
+/** 输入框还在、已清空（contenteditable 清空后 innerText 可能剩一个换行）。 */
+function assertCleared({ probe }) {
+  assert.deepEqual(probe.boxes.map((b) => b.trim()), ['']);
+}
 function assertNotReadBack({ r, probe }) {
   assert.equal(r.sendAttempted, true, JSON.stringify(r));
   assert.equal(r.readBack.found, false);
@@ -105,7 +109,7 @@ describe('页面写入适配器（真实 Ego Lite + 本地测试页）', { skip:
     test('输入框内容和正文不一致：清空、不点发送', async () => {
       const x = await reply('mangle');
       assertNoSend(x, 'input-mismatch');
-      assert.deepEqual(x.probe.boxes, ['']);
+      assertCleared(x);
       assert.equal(x.probe.top, '');
     });
 
@@ -131,7 +135,7 @@ describe('页面写入适配器（真实 Ego Lite + 本地测试页）', { skip:
     test('私信：没有输入框 → no-input-box', async () => assertNoSend(await dm('nobox'), 'no-input-box'));
     test('私信：uid 不符', async () => assertNoSend(await dm('ok', { uid: '999' }), 'uid-mismatch'));
     test('私信：页面报错 → sendError', async () => { const x = await dm('fail'); assertNotReadBack(x); assert.match(x.r.sendError, /发送失败/); });
-    test('私信：输入框内容不一致 → input-mismatch', async () => { const x = await dm('mangle'); assertNoSend(x, 'input-mismatch'); assert.deepEqual(x.probe.boxes, ['']); });
+    test('私信：输入框内容不一致 → input-mismatch', async () => { const x = await dm('mangle'); assertNoSend(x, 'input-mismatch'); assertCleared(x); });
   });
 
   describe('视频号', () => {
@@ -168,7 +172,7 @@ describe('页面写入适配器（真实 Ego Lite + 本地测试页）', { skip:
     test('目标评论已删除：comment-gone', async () => assertNoSend(await reply('gone'), 'comment-gone'));
     test('已有我的回复（按昵称判）：already-replied', async () => assertNoSend(await reply('replied'), 'already-replied'));
     test('作品里找不到目标评论：target-not-found', async () => assertNoSend(await reply('ok', { commentId: 'nope' }), 'target-not-found'));
-    test('输入框内容不一致：input-mismatch，框已清空', async () => { const x = await reply('mangle'); assertNoSend(x, 'input-mismatch'); assert.deepEqual(x.probe.boxes, ['']); });
+    test('输入框内容不一致：input-mismatch，框已清空', async () => { const x = await reply('mangle'); assertNoSend(x, 'input-mismatch'); assertCleared(x); });
     test('点了发送但回读不到', async () => { const x = await reply('silent'); assertNotReadBack(x); assert.equal(x.r.sendError, undefined); });
     test('页面报错：sendError', async () => { const x = await reply('fail'); assertNotReadBack(x); assert.match(x.r.sendError, /回复失败/); });
 
@@ -180,7 +184,7 @@ describe('页面写入适配器（真实 Ego Lite + 本地测试页）', { skip:
     test('私信：最后一句是我 → last-is-me', async () => assertNoSend(await dm('lastme'), 'last-is-me'));
     test('私信：没有输入框 → no-input-box', async () => assertNoSend(await dm('nobox'), 'no-input-box'));
     test('私信：回读不到', async () => assertNotReadBack(await dm('silent')));
-    test('私信：输入框内容不一致 → input-mismatch', async () => { const x = await dm('mangle'); assertNoSend(x, 'input-mismatch'); assert.deepEqual(x.probe.boxes, ['']); });
+    test('私信：输入框内容不一致 → input-mismatch', async () => { const x = await dm('mangle'); assertNoSend(x, 'input-mismatch'); assertCleared(x); });
   });
 
   describe('小红书', () => {
@@ -212,7 +216,7 @@ describe('页面写入适配器（真实 Ego Lite + 本地测试页）', { skip:
     test('目标评论已删除：comment-gone', async () => assertNoSend(await reply('gone'), 'comment-gone'));
     test('已有我的回复：already-replied', async () => assertNoSend(await reply('replied'), 'already-replied'));
     test('通知里没有这条：target-not-found', async () => assertNoSend(await reply('ok', { commentId: 'nope' }), 'target-not-found'));
-    test('输入框内容不一致：input-mismatch，框已清空', async () => { const x = await reply('mangle'); assertNoSend(x, 'input-mismatch'); assert.deepEqual(x.probe.boxes, ['']); });
+    test('输入框内容不一致：input-mismatch，框已清空', async () => { const x = await reply('mangle'); assertNoSend(x, 'input-mismatch'); assertCleared(x); });
     test('点了发送但回读不到', async () => { const x = await reply('silent'); assertNotReadBack(x); assert.equal(x.r.sendError, undefined); });
     test('接口 code≠0：sendError', async () => { const x = await reply('fail'); assertNotReadBack(x); assert.match(x.r.sendError, /code=-9131|评论失败/); });
 
@@ -222,6 +226,6 @@ describe('页面写入适配器（真实 Ego Lite + 本地测试页）', { skip:
     test('私信：没有输入框 → no-input-box', async () => assertNoSend(await dm('nobox'), 'no-input-box'));
     test('私信：uid 不符', async () => assertNoSend(await dm('ok', { uid: 'someone' }), 'uid-mismatch'));
     test('私信：接口报错 → sendError', async () => { const x = await dm('fail'); assertNotReadBack(x); assert.ok(x.r.sendError); });
-    test('私信：输入框内容不一致 → input-mismatch', async () => { const x = await dm('mangle'); assertNoSend(x, 'input-mismatch'); assert.deepEqual(x.probe.boxes, ['']); });
+    test('私信：输入框内容不一致 → input-mismatch', async () => { const x = await dm('mangle'); assertNoSend(x, 'input-mismatch'); assertCleared(x); });
   });
 });
