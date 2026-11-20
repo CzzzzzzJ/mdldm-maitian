@@ -389,3 +389,21 @@ describe('runWriterInSpace', () => {
     assert.match(o.script, /runInSpace\(task, params\)/);
   });
 });
+
+describe('页面写入：点发送之前出错', () => {
+  for (const plat of ['douyin', 'channels', 'xhs']) {
+    test(`${plat}：打开页面就出错 → blocked precheck-error、sendAttempted:false（不抛错，框架记 failed 而不是 needs_readback）`, async () => {
+      const m = await import(`../src/ops/engage/writers/${plat}.mjs`);
+      const task = { pages: async () => { throw new Error('页面没起来 token=abc'); } };
+      const r = await m.runInSpace(task, { op: 'reply', uid: '1', text: '你好', target: {} });
+      assert.equal(r.blocked, 'precheck-error');
+      assert.equal(r.sendAttempted, false);
+      assert.ok(!r.detail.includes('abc'), '错误文字已脱敏');
+    });
+  }
+  test('框架：precheck-error → failed、可重试', async () => {
+    const s = setup();
+    const r = await engageWrite(s.db, reply(), s.deps(fakeWriter({ uidSeen: null, sendAttempted: false, blocked: 'precheck-error', detail: 'x' })));
+    assert.deepEqual([r.status, r.reason, r.retryable], ['failed', 'precheck-error', true]);
+  });
+});

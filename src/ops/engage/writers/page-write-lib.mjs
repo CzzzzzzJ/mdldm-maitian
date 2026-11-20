@@ -133,8 +133,8 @@ const uniqById = (xs) => [...new Map(xs.map((x) => [String(x.id), x])).values()]
 export async function runWrite(task, params, plat) {
   const t = { ...DEFAULT_TIMEOUTS, ...(params.timeouts ?? {}) };
   const out = { uidSeen: null, sendAttempted: false };
-  if (params.op !== 'reply' && params.op !== 'sendDM') throw new Error(`op 只能是 reply 或 sendDM：${params.op}`);
-  if (!norm(params.text).trim()) throw new Error('text 为空');
+  if (params.op !== 'reply' && params.op !== 'sendDM') return { ...out, blocked: 'precheck-error', detail: `op 只能是 reply 或 sendDM：${params.op}` };
+  if (!norm(params.text).trim()) return { ...out, blocked: 'precheck-error', detail: 'text 为空' };
   try {
     const page = await mainPage(task);
     if (plat.hook) await installHook(page);
@@ -168,7 +168,8 @@ export async function runWrite(task, params, plat) {
   } catch (e) {
     // 点过发送之后的异常一律不往外抛：发没发出去不确定，交给上层按「已尝试」处理
     if (out.sendAttempted) return { ...out, readBack: { found: false, count: 0, nativeId: null, detail: redact(`发送后出错：${e?.message ?? e}`) } };
-    throw new Error(redact(e?.message ?? String(e)));
+    // 还没点发送：一定没发，按「重读出错」返回，框架记 failed（可再试），不记 needs_readback
+    return { ...out, blocked: 'precheck-error', detail: redact(`发送前出错：${e?.message ?? e}`) };
   }
 }
 

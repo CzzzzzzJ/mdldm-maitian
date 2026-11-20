@@ -28,7 +28,7 @@ const OPS = {
 // runner 在脚本开跑之前就失败的原因：肯定没发
 const BEFORE_SCRIPT = { busy: 'space-busy', 'user-controlled': 'space-user-controlled', 'profile-needed': 'profile-needed',
   'profile-rejected': 'profile-rejected', 'bad-space-name': 'bad-space-name', 'spawn-failed': 'runner-not-started', 'open-space-failed': 'runner-not-started' };
-const RETRYABLE = new Set(['space-busy', 'space-user-controlled', 'lease-busy', 'round-limit', 'in-progress', 'input-mismatch', 'runner-not-started']);
+const RETRYABLE = new Set(['space-busy', 'space-user-controlled', 'lease-busy', 'round-limit', 'in-progress', 'input-mismatch', 'runner-not-started', 'precheck-error']);
 
 const iso = (ms) => new Date(ms).toISOString();
 export const roundKeyOf = (ms) => iso(ms).slice(0, 13);   // 整点小时（UTC）；台湾是 +8 整小时，同一个整点
