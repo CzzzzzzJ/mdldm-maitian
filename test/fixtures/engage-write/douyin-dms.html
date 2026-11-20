@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>抖音私信（写入测试页）</title>
+<style>
+  body { font: 14px sans-serif; margin: 20px; display: flex; gap: 20px; }
+  ul { list-style: none; padding: 0; width: 200px; }
+  li.semi-list-item { padding: 8px; border-bottom: 1px solid #eee; cursor: pointer; }
+  [contenteditable] { border: 1px solid #999; min-height: 22px; padding: 4px; width: 300px; }
+  .semi-toast-wrapper { position: fixed; top: 4px; right: 4px; }
+</style>
+</head>
+<body>
+<ul id="convs"></ul>
+<div id="panel" class="chat-panel-p"></div>
+<div id="toast" class="semi-toast-wrapper"></div>
+<script>
+// 模式（?mode=）：ok | fail | silent | mangle | lastme 最后一句是我 | nobox 打开会话没有输入框 | nouid
+const mode = new URLSearchParams(location.search).get('mode') || 'ok';
+const ME = '106';
+const FK = '__reactFiber$wtest';
+if (mode !== 'nouid') window.__loginUser = { uid: ME, nickname: '麦田测试号' };
+let sendClicks = 0, seq = 0, openId = null;
+const M = (id, conversationId, isFromMe, text, at) => ({ serverId: 's' + id, clientMessageId: 'c' + id, conversationId, isFromMe, type: 7, content: JSON.stringify({ text }), createdAt: new Date(at) });
+const t0 = Date.now() - 3600_000;
+const convs = [
+  { id: '0:1:106:601', toParticipantUserId: '601', isStrangerChat: false, isGroupChat: false, unreadCount: 1, name: '甲', msgs: [M(1, '0:1:106:601', true, '你好', t0), M(2, '0:1:106:601', false, '请问怎么买', t0 + 1000)] },
+  { id: '0:1:106:602', toParticipantUserId: '602', isStrangerChat: false, isGroupChat: false, unreadCount: 0, name: '乙', msgs: [M(3, '0:1:106:602', false, '在吗', t0)] },
+];
+if (mode === 'lastme') convs[0].msgs.push(M(9, '0:1:106:601', true, '稍等我看看', t0 + 2000));
+for (const c of convs) c.lastMessage = c.msgs.at(-1);
+
+function renderList() {
+  const ul = document.getElementById('convs');
+  ul.innerHTML = '';
+  for (const c of convs) {
+    const li = document.createElement('li');
+    li.className = 'semi-list-item';
+    li.innerHTML = `<div class="item-header-h">${c.name}</div><div>${JSON.parse(c.lastMessage.content).text}</div>`;
+    // 仿 S0：li 的 fiber 往上 2 层 memoizedProps.item 是 IM SDK 的 Conversation
+    li[FK] = { memoizedProps: {}, return: { memoizedProps: {}, return: { memoizedProps: { item: c } } } };
+    li.onclick = () => { openId = c.id; renderPanel(); };
+    ul.appendChild(li);
+  }
+}
+
+function renderPanel() {
+  const c = convs.find((x) => x.id === openId);
+  const p = document.getElementById('panel');
+  p.innerHTML = '<div class="msg-list-l"></div>';
+  for (const m of c.msgs) {
+    const b = document.createElement('div');
+    b.className = 'msg-item-m';
+    b.textContent = (m.isFromMe ? '我：' : '对方：') + JSON.parse(m.content).text;
+    b[FK] = { memoizedProps: {}, return: { memoizedProps: { message: m } } };
+    p.firstChild.appendChild(b);
+  }
+  if (mode === 'nobox') return;
+  const f = document.createElement('div');
+  f.className = 'chat-footer-f';
+  f.innerHTML = '<div class="chat-editor-e"><div class="chat-input-c" contenteditable="true"></div></div><button class="send-btn-x">发送</button>';
+  p.appendChild(f);
+  const ed = f.querySelector('[contenteditable]');
+  if (mode === 'mangle') ed.addEventListener('input', () => { if (!ed.dataset.m) { ed.dataset.m = '1'; ed.textContent = ed.textContent.slice(1); } });
+  f.querySelector('button').onclick = () => onSend(c, ed);
+}
+
+function toast(msg) { document.getElementById('toast').innerHTML = `<div class="semi-toast-content"><span>${msg}</span></div>`; }
+
+function onSend(c, ed) {
+  sendClicks++;
+  const text = ed.innerText;
+  if (mode === 'fail') { setTimeout(() => toast('消息发送失败'), 200); return; }
+  if (mode === 'silent') return;
+  const m = { clientMessageId: 'cm' + (++seq), serverId: null, conversationId: c.id, isFromMe: true, type: 7, content: JSON.stringify({ text }), createdAt: new Date() };
+  setTimeout(() => { c.msgs.push(m); c.lastMessage = m; renderList(); renderPanel(); }, 300);
+}
+
+window.__probe = () => ({
+  sendClicks, openId,
+  boxes: [...document.querySelectorAll('[class*=chat-editor-] [contenteditable=true]')].map((b) => b.innerText),
+  mine: convs.flatMap((c) => c.msgs.filter((m) => m.isFromMe && m.clientMessageId.startsWith('cm')).map((m) => ({ conv: c.id, text: JSON.parse(m.content).text }))),
+});
+renderList();
+</script>
+</body>
+</html>

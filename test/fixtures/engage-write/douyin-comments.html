@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>抖音评论管理（写入测试页）</title>
+<style>
+  body { font: 14px sans-serif; margin: 20px; }
+  [contenteditable] { border: 1px solid #999; min-height: 22px; padding: 4px; }
+  .operations-q > div { display: inline-block; margin-right: 12px; cursor: pointer; color: #36c; }
+  .comment-item-b { padding: 6px; border-bottom: 1px solid #eee; }
+  .reply-item-k { margin-left: 32px; }
+  .more-m span { color: #36c; cursor: pointer; }
+  .semi-toast-wrapper { position: fixed; top: 4px; right: 4px; }
+</style>
+</head>
+<body>
+<!-- 仿 S0：页面顶部还有一个给作品发一级评论的 contenteditable，写入适配器绝不能用它 -->
+<div class="publish-top-x"><div class="input-top-y" contenteditable="true" id="top-box"></div><button>发布</button></div>
+<div id="list" class="comment-list-z"></div>
+<div id="toast" class="semi-toast-wrapper"></div>
+<script>
+// 模式（?mode=）：ok 发出后渲染我的回复 | fail 弹「回复失败」 | silent 点了没反应 | mangle 输入后框里内容被改
+//               gone 目标评论显示已删除 | replied 目标下已有我的直接回复 | nouid 页面读不到登录账号
+const mode = new URLSearchParams(location.search).get('mode') || 'ok';
+const ME = '106';
+const FK = '__reactFiber$wtest';
+if (mode !== 'nouid') window.__loginUser = { uid: ME, nickname: '麦田测试号' };
+const WORK = '7001';
+let sendClicks = 0, deleteClicks = 0, seq = 0;
+const C = (cid, uid, nick, text, extra = {}) => ({ cid, aweme_id: WORK, user: { uid, nickname: nick }, text, reply_id: '0', reply_to_reply_id: '0', reply_comment_total: 0, ...extra });
+const roots = [C('c1', '501', '甲', '第一条评论', { reply_comment_total: 1 }), C('c2', '503', '丙', '第二条评论')];
+const subs = { c1: [C('c1r1', '502', '乙', '楼中楼一条', { reply_id: 'c1' })] };
+if (mode === 'replied') { roots[0].reply_comment_total = 2; subs.c1.push(C('c1me', ME, '麦田测试号', '之前回过了', { reply_id: 'c1' })); }
+const expanded = {};
+
+// 仿 React：元素上挂 __reactFiber$xxx，往上两层 return 的 memoizedProps.comment 是评论对象
+function fiberize(el, c) { el[FK] = { memoizedProps: { className: el.className }, return: { memoizedProps: { children: null }, return: { memoizedProps: { comment: c, index: 0 }, return: null } } }; }
+
+function item(c, isSub) {
+  const el = document.createElement('div');
+  el.className = isSub ? 'comment-item-b reply-item-k' : 'comment-item-b';
+  fiberize(el, c);
+  const gone = mode === 'gone' && c.cid === 'c1';
+  el.innerHTML = `<div class="name-u">${c.user.nickname}</div><div class="text-t">${gone ? '该评论已删除' : c.text}</div><div class="operations-q"><div>回复</div><div>删除</div></div>`;
+  const [reply, del] = el.querySelectorAll('.operations-q > div');
+  reply.onclick = () => openReply(el, c);
+  del.onclick = () => { deleteClicks++; };
+  return el;
+}
+
+function render() {
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  for (const r of roots) {
+    const wrap = document.createElement('div');
+    wrap.className = 'comment-wrap-w';
+    wrap.appendChild(item(r));
+    const s = subs[r.cid] || [];
+    if (expanded[r.cid]) for (const x of s) wrap.appendChild(item(x, true));
+    else if (s.length) {
+      const m = document.createElement('div');
+      m.className = 'more-m';
+      m.innerHTML = `<span>查看 ${s.length} 条回复</span>`;
+      m.querySelector('span').onclick = () => { expanded[r.cid] = true; render(); };
+      wrap.appendChild(m);
+    }
+    list.appendChild(wrap);
+  }
+}
+
+function openReply(el, c) {
+  document.querySelectorAll('.reply-content-r').forEach((x) => x.remove());
+  const box = document.createElement('div');
+  box.className = 'reply-content-r';
+  box.innerHTML = `<div class="input-i" contenteditable="true" placeholder="回复 ${c.user.nickname}："></div><div class="btns-o"><button class="send-s">发送</button></div>`;
+  el.appendChild(box);
+  const ed = box.querySelector('[contenteditable]');
+  if (mode === 'mangle') ed.addEventListener('input', () => { if (!ed.dataset.m) { ed.dataset.m = '1'; ed.textContent = ed.textContent + '（已过滤）'; } });
+  box.querySelector('.send-s').onclick = () => onSend(c, ed);
+}
+
+function toast(msg) { document.getElementById('toast').innerHTML = `<div class="semi-toast-content"><span class="semi-toast-content-text">${msg}</span></div>`; }
+
+function onSend(target, ed) {
+  sendClicks++;
+  const text = ed.innerText;
+  if (mode === 'fail') { setTimeout(() => toast('回复失败，请稍后重试'), 200); return; }
+  if (mode === 'silent') return;
+  const root = target.reply_id && target.reply_id !== '0' ? target.reply_id : target.cid;
+  const n = C('n' + (++seq), ME, '麦田测试号', text, { reply_id: root, reply_to_reply_id: root === target.cid ? '0' : target.cid });
+  setTimeout(() => {
+    (subs[root] ||= []).push(n);
+    expanded[root] = true;
+    render();
+    // 同一条也出现在页面自己的回复接口响应里（适配器要按 cid 去重，count 仍是 1）
+    (window.__engCap ||= []).push({ url: 'https://creator.douyin.com/web/api/third_party/aweme/api/comment/write/aweme/v1/web/comment/reply/', t: Date.now(), body: JSON.stringify({ status_code: 0, comment: n }) });
+  }, 300);
+}
+
+window.__probe = () => ({
+  sendClicks, deleteClicks,
+  top: document.getElementById('top-box').innerText,
+  boxes: [...document.querySelectorAll('[class*=reply-content-] [contenteditable=true]')].map((b) => b.innerText),
+  mine: Object.values(subs).flat().filter((x) => x.user.uid === ME).map((x) => ({ cid: x.cid, text: x.text, reply_id: x.reply_id, reply_to_reply_id: x.reply_to_reply_id })),
+});
+render();
+</script>
+</body>
+</html>
