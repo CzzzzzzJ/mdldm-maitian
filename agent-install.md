@@ -38,7 +38,7 @@ node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a
 
 ### 2. 下载麦田本体
 
-装到 `~/maitian/`（用户可通过环境变量 `MAITIAN_HOME` 指定其他目录，有则用其值）：
+装到 `~/maitian/`（用户可通过环境变量 `MAITIAN_HOME` 指定其他目录，有则用其值；后面每一步的路径都按同一个目录来）：
 
 ```bash
 DIR=${MAITIAN_HOME:-$HOME/maitian}
@@ -72,17 +72,29 @@ else { git clone --depth 1 https://github.com/CzzzzzzJ/mdldm-maitian.git $dest }
 ```bash
 SKILL_DIR=<你所属 Agent 的 skill 目录>   # 例如 ~/.claude/skills
 mkdir -p "$SKILL_DIR"
-ln -s "$HOME/maitian/mdldm-maitian/skills/maitian-publish" "$SKILL_DIR/maitian-publish"
+MAITIAN_DIR=${MAITIAN_HOME:-$HOME/maitian}/mdldm-maitian
+ln -s "$MAITIAN_DIR/skills/maitian-publish" "$SKILL_DIR/maitian-publish"
 ```
 
-不会用符号链接的 Agent，直接把 `~/maitian/mdldm-maitian/skills/maitian-publish` 整个目录拷进 skill 目录。
+不会用符号链接的 Agent，直接把 `<安装目录>/mdldm-maitian/skills/maitian-publish` 整个目录拷进 skill 目录。
+
+Windows（PowerShell）没有 `ln -s`，直接拷贝：
+
+```powershell
+$Base = if ($env:MAITIAN_HOME) { $env:MAITIAN_HOME } else { Join-Path $HOME 'maitian' }
+$SkillDir = '<你所属 Agent 的 skill 目录>'
+New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null
+Copy-Item -Recurse -Force (Join-Path $Base 'mdldm-maitian\skills\maitian-publish') $SkillDir
+```
+
+拷贝的方式不会跟着 `git pull` 更新，麦田升级后要重新拷一次。
 
 装好后确认：`<skill 目录>/maitian-publish/SKILL.md` 存在。
 
 ### 4. 生成配置（可选，向导也会做）
 
 ```bash
-cd "$HOME/maitian/mdldm-maitian"
+cd "${MAITIAN_HOME:-$HOME/maitian}/mdldm-maitian"
 cp config.example.json config.json
 ```
 
@@ -95,7 +107,7 @@ cp config.example.json config.json
 1. **运行安装向导**（交互式：检查环境、生成 `config.json`、装开机自启、打开各平台登录页）：
 
    ```bash
-   cd ~/maitian/mdldm-maitian && node src/init.mjs
+   cd "${MAITIAN_HOME:-$HOME/maitian}/mdldm-maitian" && node src/init.mjs
    ```
 
    向导最后会给出大屏地址 `http://localhost:8787/?key=<web.key>`，请用户在浏览器打开。
@@ -109,7 +121,7 @@ cp config.example.json config.json
 用户完成向导和登录后，检查各平台登录态（不上传、不填写）：
 
 ```bash
-cd ~/maitian/mdldm-maitian && node src/hub.mjs doctor
+cd "${MAITIAN_HOME:-$HOME/maitian}/mdldm-maitian" && node src/hub.mjs doctor
 ```
 
 全部通过即安装完成。此后用户说「整理发布 / 进入发布」等触发词，发布 skill 即开始工作。
