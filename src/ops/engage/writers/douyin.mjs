@@ -129,6 +129,11 @@ async function prepareReply({ page, params, t, me }) {
   return {
     send: sendNearBox('^发送$'),
     items: async () => (await comments(page)).map((x) => ({ id: x.id, mine: mine(x), rel: directTo(x) === id, text: x.text })),
+    // 点发送后页面自己发的评论写接口（不是 list 类读接口）返回 status_code≠0
+    apiError: async (from) => {
+      const bad = (await capturedJson(page, 'comment/(?!list)', from)).find((c) => c.json.status_code != null && c.json.status_code !== 0);
+      return bad ? `${bad.url.replace(/^https?:\/\/[^/]+/, '')} status_code=${bad.json.status_code}${bad.json.status_msg ? ` ${bad.json.status_msg}` : ''}` : null;
+    },
   };
 }
 
