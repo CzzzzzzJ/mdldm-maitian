@@ -1,6 +1,7 @@
 <p align="center"><img src="docs/readme/banner.png" alt="麦田 · 给多平台博主的开源工作台" /></p>
 
 <p align="center">
+  <a href="https://maitian.mdldm.club/?utm_source=github&utm_medium=readme&utm_campaign=maitian-readme"><img src="https://img.shields.io/badge/官网-maitian.mdldm.club-7B5CFF" alt="官网" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2ea44f" alt="MIT" /></a>
   <img src="https://img.shields.io/badge/macOS-only-1c1a16?logo=apple" alt="macOS" />
   <img src="https://img.shields.io/badge/Node.js-%E2%89%A5%2022.5-5FA04E?logo=nodedotjs&logoColor=white" alt="Node 22.5+" />
