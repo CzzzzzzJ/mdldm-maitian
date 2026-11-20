@@ -3,11 +3,15 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { config } from './feishu.mjs';
+import { PLATFORM_NAMES } from './targets.mjs';
+import { initAccountTraffic } from './account-traffic.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DB_PATH = process.env.MAITIAN_DB || path.join(ROOT, 'data', 'hub.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
+initAccountTraffic(db);
 db.exec(`
 CREATE TABLE IF NOT EXISTS episodes (id TEXT PRIMARY KEY, episode INTEGER, name TEXT, dir TEXT, schedule TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS tasks (episode_id TEXT, platform TEXT, state TEXT, detail TEXT, url TEXT, tab_id INTEGER, updated_at TEXT, PRIMARY KEY (episode_id, platform));
@@ -22,7 +26,11 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, episode_id TEXT, platform TEXT, action TEXT, result TEXT);
 `);
 const now = () => new Date().toISOString();
-export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', zsz: '知识站' };
+export const NAMES = new Proxy(PLATFORM_NAMES, { get(names, id) {
+  if (typeof id !== 'string' || (id !== 'bilibili' && !id.startsWith('bilibili@'))) return names[id];
+  const account = (config.bilibiliAccounts || []).find(a => a.id === (id === 'bilibili' ? 'default' : id.slice(9)));
+  return account && account.name !== '默认账号' ? `B站 · ${account.name}` : (id === 'bilibili' ? 'B站' : id);
+} });
 // 已经到位、不允许再跑的状态（防重）
 export const LOCKED = ['filled', 'awaiting_user', 'scheduled', 'published'];
 export const STATE_CN = { planned: '计划中', pending: '等待', running: '进行中', filled: '已填好', awaiting_user: '待你点发布', scheduled: '已定时', published: '已发布', failed: '异常', not_logged_in: '未登录', stopped: '已停止', skipped: '跳过' };

@@ -10,6 +10,9 @@
   "chromePort": 9333,
   "chromeProfile": "~/publish-hub/chrome-profile",
 
+  "enabledPlatforms": ["bilibili", "douyin", "xhs", "channels", "youtube", "x", "instagram", "zsz"],
+  "bilibiliAccounts": [{ "id": "default", "name": "默认账号", "enabled": true }],
+
   "rootPath": "/Volumes/<NAS 共享名>/视频导出",
   "nasUrl": "smb://<用户名>@<NAS 地址>/<共享名>",
 
