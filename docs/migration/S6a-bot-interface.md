@@ -15,7 +15,7 @@ MAITIAN_OPS_DB=/path/to/mdldm-maitian/data/ops.db node /path/to/mdldm-maitian/sr
 
 - 走 stdio。stdout 只有 MCP 协议，日志写 stderr。
 - `MAITIAN_OPS_DB` 不设时用仓库里的 `data/ops.db`。
-- `--scope` 不传时是 `read`。这一版只有 read 组。传 `engage`、`publish`、`manage` 时，服务在 stderr 写一行说明，仍然只注册 read 组。回复、私信这些写工具在后面的 spec 里做。
+- `--scope` 不传时是 `read`。`--scope engage` 是回复评论、发私信的写工具（`reply_comment`、`send_dm`），只注册这两个、要口令，单独起一个服务，见 [S7-engage.md](S7-engage.md)。传 `publish`、`manage` 时，服务在 stderr 写一行说明，仍然只注册 read 组。
 - MCP 只查库，不现抓页面，也不起浏览器。要拿最新状态就调 `refresh_now`，等守护进程抓完再读。
 
 MCP 客户端配置示例（JSON 形式，各平台字段名可能不同）：

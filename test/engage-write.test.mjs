@@ -369,3 +369,23 @@ describe('engage-db 升级', () => {
     openOpsDb(file).close();   // 再开一次也不报错
   });
 });
+
+describe('runWriterInSpace', () => {
+  test('在账号自己的 space、Profile 5 里跑对应平台的写入模块（runner 默认持 space 锁）', async () => {
+    const { runWriterInSpace, WRITER_FILES, WRITE_TIMEOUT_MS } = await import('../src/ops/engage/writers/index.mjs');
+    const { fileURLToPath } = await import('node:url');
+    const fs = await import('node:fs');
+    const db = freshDb();
+    const seen = [];
+    const runner = async (o) => { seen.push(o); return { ok: true, result: {} }; };
+    await runWriterInSpace({ account: getAccount(db, BILI), params: { op: 'reply', text: 't' } }, { runner });
+    const o = seen[0];
+    assert.equal(o.space, 'kinso/Bili/478358005');
+    assert.equal(o.profileId, 'Profile 5');
+    assert.equal(o.timeoutMs, WRITE_TIMEOUT_MS.Bili);
+    assert.equal(o.lock, undefined, '不关 space 锁');
+    assert.ok(fs.existsSync(fileURLToPath(o.params.moduleUrl)));
+    assert.match(o.params.moduleUrl, new RegExp(`/writers/${WRITER_FILES.Bili}$`));
+    assert.match(o.script, /runInSpace\(task, params\)/);
+  });
+});
