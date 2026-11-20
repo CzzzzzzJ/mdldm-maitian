@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>小红书私信（写入测试页）</title>
+<style>
+  body { font: 14px sans-serif; margin: 20px; }
+  .xhs-im-input-bar-editor { border: 1px solid #999; min-height: 22px; width: 300px; padding: 4px; }
+  .xhs-im-input-bar-send { display: inline-block; color: #36c; cursor: pointer; }
+  .toast-t { position: fixed; top: 4px; right: 4px; }
+</style>
+</head>
+<body>
+<div class="chat-messages"></div>
+<div class="chat-footer"></div>
+<div id="toast"></div>
+<script>
+// 仿 /chat/<chat_user_id>：?peer= 是对方 uid。模式（?mode=）：ok | fail | silent | mangle | lastme | nobox | official | nouid
+const q = new URLSearchParams(location.search);
+const mode = q.get('mode') || 'ok';
+const PEER = q.get('peer') || 'p1';
+const ME = 'me_x';
+if (mode !== 'nouid') window.__INITIAL_STATE__ = { user: { userInfo: { user_id: ME, nickname: '麦田测试号' } } };
+let sendClicks = 0, seq = 0;
+const t0 = Date.now() - 3600_000;
+const cap = (url, body) => (window.__engCap ||= []).push({ url, t: Date.now(), body: JSON.stringify(body) });
+const m = (id, from, to, at, text) => ({ id, sender_id: from, receiver_id: to, created_at: at, content: JSON.stringify({ content: text, content_type: 1 }) });
+const history = [m('h2', PEER, ME, t0 + 1000, '你好，想问一下'), m('h1', ME, PEER, t0, '欢迎')];
+if (mode === 'lastme') history.unshift(m('h3', ME, PEER, t0 + 2000, '稍等'));
+// 仿挂钩：会话列表和这个会话的历史消息（URL 里留 chat_user_id，同 page-lib 的 KEEP）
+cap('https://edith.xiaohongshu.com/api/im/web/v3/chats', { code: 0, data: { chats: [{ chat_user_id: PEER, user_id: ME, last_msg_time: t0 + 1000, info: { nickname: '甲', is_official: mode === 'official' } }] } });
+cap(`https://edith.xiaohongshu.com/api/im/web/messages/history?chat_user_id=${PEER}`, { code: 0, data: { out_message_list: history } });
+
+const box = document.querySelector('.chat-messages');
+for (const x of [...history].reverse()) { const d = document.createElement('div'); d.textContent = JSON.parse(x.content).content; box.appendChild(d); }
+if (mode !== 'nobox' && mode !== 'official') {
+  const f = document.querySelector('.chat-footer');
+  f.innerHTML = '<div class="xhs-im-input-bar"><div class="xhs-im-input-bar-editor" contenteditable="true" placeholder="发消息"></div><div class="xhs-im-input-bar-send">发送</div></div>';
+  const ed = f.querySelector('.xhs-im-input-bar-editor');
+  if (mode === 'mangle') ed.addEventListener('input', () => { if (!ed.dataset.m) { ed.dataset.m = '1'; ed.textContent = ed.textContent + ' '; ed.textContent += 'x'; } });
+  f.querySelector('.xhs-im-input-bar-send').onclick = () => onSend(ed);
+}
+
+function onSend(ed) {
+  sendClicks++;
+  const text = ed.innerText;
+  if (mode === 'silent') return;
+  setTimeout(() => {
+    if (mode === 'fail') {
+      cap('https://edith.xiaohongshu.com/api/im/web/v1/message/send', { code: -1, success: false, msg: '发送失败' });
+      document.getElementById('toast').innerHTML = '<div class="toast-t">发送失败</div>';
+      return;
+    }
+    cap('https://edith.xiaohongshu.com/api/im/web/v1/message/send', { code: 0, success: true, data: m('sm' + (++seq), ME, PEER, Date.now(), text) });
+    const d = document.createElement('div'); d.textContent = text; box.appendChild(d);
+    ed.textContent = '';
+  }, 300);
+}
+
+window.__probe = () => ({
+  sendClicks,
+  boxes: [...document.querySelectorAll('.xhs-im-input-bar-editor')].map((b) => b.innerText),
+});
+</script>
+</body>
+</html>

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-// 麦田本地 MCP（stdio）。启动：node src/mcp/server.mjs --scope read
-// 只做参数校验和转发到 src/ops/engage/*：只查库，不现抓、不起 runner。stdout 只走 MCP 协议，日志写 stderr。
+// 麦田本地 MCP（stdio）。启动：node src/mcp/server.mjs --scope read | engage
+// 只做参数校验和转发到 src/ops/engage/*。stdout 只走 MCP 协议，日志写 stderr。
+//   read：只查库，不现抓、不起 runner。
+//   engage：只注册 reply_comment、send_dm（不带 read 组），而且只在进程环境的 MAITIAN_ENGAGE_TOKEN 和仓库 .env 里的一致时注册
+//          （src/ops/tokens.mjs 的 checkToken，常数时间）；对不上或缺失就一个工具都不注册，只往 stderr 写一句原因。口令值不进日志、错误、返回。
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -9,6 +12,9 @@ import { z } from 'zod';
 import { openOpsDb } from '../ops/db.mjs';
 import { opsDbPath } from '../ops/paths.mjs';
 import * as q from '../ops/engage/query.mjs';
+import { engageWrite } from '../ops/engage/write.mjs';
+import { checkToken, TOKEN_SCOPES } from '../ops/tokens.mjs';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { subscribe, unsubscribe, EVENT_TYPES } from '../ops/engage/subscribers.mjs';
 
 export const SCOPES = ['read', 'engage', 'publish', 'manage'];
@@ -49,23 +55,63 @@ const READ_TOOLS = [
   }, (db, a) => q.refreshNow(db, a)],
 ];
 
+const text = z.string().describe('要发的正文，1 到 1000 字');
+const idempotencyKey = z.string().describe('幂等键，建议填事件 id；同一个键 24 小时内发出过就返回 duplicate，点了发送没回读到的也不再发');
+const eventId = z.string().optional().describe('对应的事件 id（可选）；发出后自动回执 replied。不填时回执这个目标所有没回执的同类事件');
+const WRITE_NOTE = '发前在平台上重读、发后回读；返回 status：sent（回读到了）、needs_readback（点了发送但没回读到，绝不重试，请人工看）、failed（没发，reason 说明，如 comment-gone、already-replied、last-is-me）、duplicate、rejected（能力位关、本轮已满 15 条、平台正被占用等）';
+
+// [工具名, 说明, 入参, (db, args, deps) => 结果]
+const ENGAGE_TOOLS = [
+  ['reply_comment', `回复一条评论（含楼中楼）。${WRITE_NOTE}`, { commentId: id('评论 id'), text, idempotencyKey, eventId },
+    (db, a, deps) => engageWrite(db, { op: 'reply', targetId: a.commentId, text: a.text, idempotencyKey: a.idempotencyKey, eventId: a.eventId, caller: deps.caller() }, deps)],
+  ['send_dm', `回复一个私信会话。${WRITE_NOTE}`, { conversationId: id('会话 id'), text, idempotencyKey, eventId },
+    (db, a, deps) => engageWrite(db, { op: 'sendDM', targetId: a.conversationId, text: a.text, idempotencyKey: a.idempotencyKey, eventId: a.eventId, caller: deps.caller() }, deps)],
+];
+
 const reply = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 
 export const READ_TOOL_NAMES = READ_TOOLS.map(([name]) => name);
+export const ENGAGE_TOOL_NAMES = ENGAGE_TOOLS.map(([name]) => name);
 
-/** tools：只注册这几个工具（不传是 read 组全部）。名字不在 read 组里直接抛错，免得拼错后悄悄少一个。 */
-export function buildServer(db, { scope = 'read', tools = null, log = (s) => console.error(s) } = {}) {
-  if (!SCOPES.includes(scope)) throw new Error(`--scope 只能是 ${SCOPES.join('、')}：${scope}`);
-  if (scope !== 'read') log(`[maitian-mcp] --scope ${scope}：写工具还没做（S6a 只有 read 组），只注册 read 组`);
-  const unknown = (tools ?? []).filter((t) => !READ_TOOL_NAMES.includes(t));
-  if (unknown.length) throw new Error(`不在 read 组里的工具：${unknown.join('、')}`);
-  const server = new McpServer({ name: 'maitian', version: '0.3.0' });
-  for (const [name, description, inputSchema, run] of READ_TOOLS) {
-    if (tools && !tools.includes(name)) continue;
+/** engage 口令：对上返回 null，否则返回原因（不含口令值）。 */
+export function engageTokenProblem({ token = process.env.MAITIAN_ENGAGE_TOKEN, envPath } = {}) {
+  const name = TOKEN_SCOPES.engage;
+  if (!token) return `进程环境里没有 ${name}`;
+  return checkToken('engage', token, envPath ? { envPath } : undefined) ? null : `${name} 和仓库 .env 里的不一致，或 .env 里没有这个口令`;
+}
+
+function register(server, db, list, deps) {
+  for (const [name, description, inputSchema, run] of list) {
     server.registerTool(name, { description, inputSchema }, async (args) => {
-      try { return reply(await run(db, args ?? {})); } catch (e) { return { isError: true, content: [{ type: 'text', text: e.message }] }; }
+      try { return reply(await run(db, args ?? {}, deps)); } catch (e) { return { isError: true, content: [{ type: 'text', text: e.message }] }; }
     });
   }
+}
+
+/**
+ * scope read：tools 只注册这几个（不传是 read 组全部），名字不在 read 组里直接抛错，免得拼错后悄悄少一个。
+ * scope engage：口令（engageToken，默认读进程环境）对上才注册 engage 组；writeDeps 透传给 engageWrite（测试注入假 writer、假通知）。
+ */
+export function buildServer(db, { scope = 'read', tools = null, log = (s) => console.error(s), engageToken = process.env.MAITIAN_ENGAGE_TOKEN, envPath, writeDeps = {} } = {}) {
+  if (!SCOPES.includes(scope)) throw new Error(`--scope 只能是 ${SCOPES.join('、')}：${scope}`);
+  const server = new McpServer({ name: 'maitian', version: '0.3.0' });
+  if (scope === 'engage') {
+    const problem = engageTokenProblem({ token: engageToken, envPath });
+    if (problem) {
+      log(`[maitian-mcp] --scope engage：${problem}，没有注册任何工具`);
+      // 声明一个空的工具列表，客户端 tools/list 拿到 []，不会当成服务坏了
+      server.server.registerCapabilities({ tools: {} });
+      server.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [] }));
+      return server;
+    }
+    const caller = () => `mcp:${server.server.getClientVersion()?.name ?? 'unknown'}`;
+    register(server, db, ENGAGE_TOOLS, { ...writeDeps, caller });
+    return server;
+  }
+  if (scope !== 'read') log(`[maitian-mcp] --scope ${scope}：写工具还没做，只注册 read 组`);
+  const unknown = (tools ?? []).filter((t) => !READ_TOOL_NAMES.includes(t));
+  if (unknown.length) throw new Error(`不在 read 组里的工具：${unknown.join('、')}`);
+  register(server, db, READ_TOOLS.filter(([name]) => !tools || tools.includes(name)), {});
   return server;
 }
 
@@ -74,7 +120,8 @@ export async function main(argv = process.argv.slice(2)) {
   const db = openOpsDb(opsDbPath());
   const server = buildServer(db, { scope: values.scope });
   await server.connect(new StdioServerTransport());
-  console.error(`[maitian-mcp] 已启动（scope ${values.scope}，${READ_TOOLS.length} 个 read 工具）`);
+  const n = values.scope === 'engage' ? (engageTokenProblem() ? 0 : ENGAGE_TOOLS.length) : READ_TOOLS.length;
+  console.error(`[maitian-mcp] 已启动（scope ${values.scope}，${n} 个工具）`);
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === import.meta.filename) {

@@ -60,8 +60,28 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 CREATE INDEX IF NOT EXISTS sync_jobs_platform ON sync_jobs (platformCode, kind, requestedAt);
 -- 每个账号每种 kind 第一次成功入库的时间。有这行才出事件（空的首轮也算建立了基线）
 CREATE TABLE IF NOT EXISTS engage_baselines (accountId TEXT NOT NULL, kind TEXT NOT NULL, establishedAt TEXT NOT NULL, PRIMARY KEY (accountId, kind));
+-- S7 engage 写入：每次 reply_comment / send_dm 调用一行（含被拒、重复的）。只存正文的 sha256，不存正文。
+-- status：pending（正在发）、sent、needs_readback、failed、duplicate、rejected。sendAttempted：点过发送 / 调过发送接口。
+-- roundKey：整点小时（UTC，'YYYY-MM-DDTHH'），每轮上限和连续失败按它算。
+CREATE TABLE IF NOT EXISTS actions (
+  id TEXT PRIMARY KEY, op TEXT NOT NULL, caller TEXT, accountId TEXT, platformCode TEXT NOT NULL, targetId TEXT NOT NULL,
+  textHash TEXT NOT NULL, idempotencyKey TEXT NOT NULL, eventId TEXT,
+  status TEXT NOT NULL, reason TEXT, detail TEXT, sendAttempted INTEGER NOT NULL DEFAULT 0, readBack TEXT,
+  roundKey TEXT NOT NULL, createdAt TEXT NOT NULL, finishedAt TEXT,
+  targetLastAt TEXT   -- send_dm 发信时库里会话的 lastAt（平台时间），用它判断「对方之后有没有再说话」，不拿本机时钟和平台时间比
+);
+CREATE INDEX IF NOT EXISTS actions_key ON actions (idempotencyKey, createdAt);
+CREATE INDEX IF NOT EXISTS actions_round ON actions (platformCode, roundKey);
+CREATE INDEX IF NOT EXISTS actions_target ON actions (targetId, op, createdAt);
+CREATE INDEX IF NOT EXISTS actions_status ON actions (status, createdAt);
+-- 平台写入租约：同一平台同一时间只有一个写入方（跨 MCP 进程）。过期的可以接管。
+CREATE TABLE IF NOT EXISTS engage_write_leases (platformCode TEXT PRIMARY KEY, holder TEXT NOT NULL, acquiredAt TEXT NOT NULL, expiresAt TEXT NOT NULL);
+-- 连续 2 轮写入失败自动关写能力位的记录；alertedAt 是提醒真发出的时间（没发出下次调用时补发）
+CREATE TABLE IF NOT EXISTS engage_write_trips (id TEXT PRIMARY KEY, platformCode TEXT NOT NULL, trippedAt TEXT NOT NULL, rounds TEXT NOT NULL, detail TEXT, alertedAt TEXT);
 -- 升级前的库：已经有评论、会话行的账号补上基线，免得升级后再吞一轮
 INSERT OR IGNORE INTO engage_baselines SELECT accountId, 'comments', min(firstSeenAt) FROM comments GROUP BY accountId;
 INSERT OR IGNORE INTO engage_baselines SELECT accountId, 'dms', min(firstSeenAt) FROM conversations GROUP BY accountId;
 `);
+  // 本分支早期建的 actions 没有 targetLastAt
+  if (!db.prepare('PRAGMA table_info(actions)').all().some((c) => c.name === 'targetLastAt')) db.exec('ALTER TABLE actions ADD COLUMN targetLastAt TEXT');
 }
