@@ -194,6 +194,148 @@ describe('页面写入适配器（真实 Ego Lite + 本地测试页）', { skip:
     test('页面报错：sendError', async () => { const x = await reply('fail'); assertNotReadBack(x); assert.match(x.r.sendError, /回复失败/); });
   });
 
+  // 2026-11-21 真实调用：旧作品下的 8 条报「切不到作品」、1 条切过去了却「没找到评论」。只读核对真实页面后做的测试页：
+  // 抽屉作品列表打开后最慢 3.3 秒才出来、滚到底才翻页；默认作品的一楼列表晚到会盖掉已切过去的作品；一楼每页 10 条，滚到页面底部才加载下一页。
+  describe('抖音（选择作品、一楼翻页）', () => {
+    const s = space('dyp');
+    const base = { uid: '106', nickname: '麦田测试号', test: { loginFromPage: true } };
+    const TEXT = '谢谢支持！';
+    const reply = (mode, target = {}, extra = {}, q = {}) => write(s, 'douyin.mjs', { ...base, op: 'reply', text: TEXT,
+      target: { commentId: 'w05-c1', workId: 'w05', parentId: null, rootId: 'w05-c1', authorUid: '601', authorNickname: '用户1', commentText: '一楼评论1', ...target },
+      urls: { comments: pageUrl('douyin-comments-picker.html', { mode, ...q }) }, ...extra });
+    const on = (w, i) => ({ commentId: `${w}-c${i}`, workId: w, rootId: `${w}-c${i}` });
+    const sentOn = (x, w, cid) => { assertSent(x, 'n1'); assert.equal(x.probe.current, w); assert.deepEqual(x.probe.mine.map((m) => [m.aweme_id, m.reply_id]), [[w, cid]]); assert.equal(x.probe.top, ''); };
+
+    test('作品列表打开 3.5 秒后才出来：等到再切，回复发出', async () => sentOn(await reply('ok'), 'w05', 'w05-c1'));
+    test('旧作品在作品列表第 2 页：滚动抽屉翻页后切过去', async () => sentOn(await reply('ok', on('w30', 2)), 'w30', 'w30-c2'));
+    test('默认作品的一楼列表晚到（会盖掉已切过去的作品）：等它到了再切', async () => sentOn(await reply('race'), 'w05', 'w05-c1'));
+    test('目标在一楼第 2 页：滚到页面底部加载下一页后找到', async () => sentOn(await reply('ok', on('w05', 15)), 'w05', 'w05-c15'));
+    test('第 3 页的旧作品、第 2 页的评论：两边都翻页', async () => sentOn(await reply('ok', on('w44', 18)), 'w44', 'w44-c18'));
+
+    test('作品列表翻到底也没有：target-not-found，写明翻到底', async () => {
+      const x = await reply('ok', on('w99', 1), {}, { drawerDelay: 300 });
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /切不到作品 w99/);
+      assert.match(x.r.detail, /到底.*45 个作品/);
+    });
+    test('作品在第 3 页、翻页上限 2：target-not-found，写明上限', async () => {
+      const x = await reply('ok', on('w44', 1), { maxPickerPages: 2 }, { drawerDelay: 300 });
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /切不到作品 w44.*上限/);
+    });
+    test('一楼加载上限 1 页、目标在第 2 页：target-not-found，写明上限', async () => {
+      const x = await reply('ok', on('w05', 15), { maxCommentPages: 1 }, { drawerDelay: 300 });
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /没找到评论 w05-c15.*上限/);
+    });
+    test('一楼翻到底也没有目标：target-not-found，写明翻到底', async () => {
+      const x = await reply('ok', { commentId: 'w05-nope', workId: 'w05', rootId: 'w05-nope' }, {}, { drawerDelay: 300 });
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /没找到评论 w05-nope.*翻到底/);
+    });
+    test('翻页找到的评论下已有我的回复：already-replied，不发', async () => assertNoSend(await reply('replied', on('w30', 15), {}, { drawerDelay: 300 }), 'already-replied'));
+
+    // 第一轮评审（Gemini、GPT）指出的边界
+    test('默认作品没有评论：照样切过去发出', async () => sentOn(await reply('emptydefault', {}, {}, { drawerDelay: 300 }), 'w05', 'w05-c1'));
+    test('一楼要翻 4 页、响应比渲染早到：每次等页面渲染好再滚，「回复」等它渲染出来', async () =>
+      sentOn(await reply('ok', on('w05', 33), {}, { drawerDelay: 300, roots: 35, renderDelay: 1500 }), 'w05', 'w05-c33'));
+    test('前面 30 条一楼都有楼中楼、目标是第 31 条下的楼中楼：先展开目标所在的楼', async () => {
+      const x = await reply('ok', { commentId: 'w05-c30r1', workId: 'w05', parentId: 'w05-c30', rootId: 'w05-c30' }, {}, { drawerDelay: 300, roots: 35, subsAll: '1' });
+      sentOn(x, 'w05', 'w05-c30');
+      assert.deepEqual(x.probe.mine.map((m) => m.reply_to_reply_id), ['w05-c30r1']);
+    });
+    test('最后一页满 10 条、接口还说有下一页、下一页是空的：按翻到底报 target-not-found', async () => {
+      const x = await reply('ok', { commentId: 'w05-nope', workId: 'w05', rootId: 'w05-nope' }, {}, { drawerDelay: 300, roots: 20, emptyTail: '1' });
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /翻到底（3 页）/);
+    });
+    // 第二轮评审（Gemini、GPT）
+    test('目标是楼中楼、一楼翻页后渲染晚 1.5 秒：等目标所在的楼渲染出来再展开', async () => {
+      const x = await reply('ok', { commentId: 'w05-c30r1', workId: 'w05', parentId: 'w05-c30', rootId: 'w05-c30' }, {}, { drawerDelay: 300, roots: 35, subsAll: '1', renderDelay: 1500 });
+      sentOn(x, 'w05', 'w05-c30');
+    });
+    test('点「查看 N 条回复」2 秒后才出来：等它出来，不当成点不动', async () => {
+      const x = await reply('slowexpand', { commentId: 'w05-c0r1', workId: 'w05', parentId: 'w05-c0', rootId: 'w05-c0' }, {}, { drawerDelay: 300 });
+      sentOn(x, 'w05', 'w05-c0');
+    });
+    test('切过去的作品一楼响应没有 status_code：不拿它当依据，target-not-found', async () => {
+      const x = await reply('nostatus', {}, {}, { drawerDelay: 300 });
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /status_code=缺失/);
+    });
+    test('接口和页面都没有楼中楼总数：判断不了楼全没全，thread-incomplete，不发', async () => {
+      const x = await reply('nototal', on('w05', 2), {}, { drawerDelay: 300 });
+      assertNoSend(x, 'thread-incomplete');
+      assert.deepEqual(x.probe.boxes, []);
+    });
+    // 第三轮评审（Gemini）：Number(null) 是 0，总数为 null 时不能当成 0
+    test('接口和页面的楼中楼总数都是 null：不当成 0，thread-incomplete，不发', async () => {
+      const x = await reply('nulltotal', on('w05', 2), {}, { drawerDelay: 300 });
+      assertNoSend(x, 'thread-incomplete');
+      assert.deepEqual(x.probe.boxes, []);
+    });
+    test('要切作品但页面上没有「选择作品」：target-not-found，写明原因', async () => {
+      const x = await reply('nopicker');
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /没有「选择作品」/);
+    });
+    test('点了作品后一楼列表一直不来：target-not-found，写明没加载出列表', async () => {
+      const x = await reply('noload', {}, {}, { drawerDelay: 300 });
+      assertNoSend(x, 'target-not-found');
+      assert.match(x.r.detail, /没加载出.*一楼列表/);
+    });
+
+    // 读适配器（抓评论）用同一个 switchTo
+    const switchTo = async (work, opts = {}, then = null, q = {}) => {
+      const res = await runEgoTask({ space: s, timeoutMs: 120_000, params: { adapterUrl: new URL('../src/ops/engage/adapters/douyin.mjs', import.meta.url).href,
+        libUrl: new URL('../src/ops/engage/adapters/page-lib.mjs', import.meta.url).href, url: pageUrl('douyin-comments-picker.html', { mode: 'ok', ...q }), work, opts, then },
+      script: `const m = await import(params.adapterUrl); const L = await import(params.libUrl);
+const page = await L.mainPage(task); await L.open(page, params.url); await L.sleep(1500);
+const r = await m.switchTo(page, params.work, params.opts); await L.sleep(1500);
+const afterFirst = await page.evaluate(() => window.__probe());
+const r2 = params.then ? await m.switchTo(page, params.then) : null; if (params.then) await L.sleep(1500);
+return { r, r2, afterFirst, probe: await page.evaluate(() => window.__probe()) };` });
+      assert.equal(res.ok, true, `${res.reason}: ${res.error}`);
+      return res.result;
+    };
+    test('读适配器 switchTo：等作品列表出来、翻到第 3 页切过去', async () => {
+      const x = await switchTo('w44');
+      assert.equal(x.r.ok, true, JSON.stringify(x.r));
+      assert.equal(x.probe.current, 'w44');
+      assert.equal(x.probe.sendClicks, 0);
+    });
+    test('读适配器 switchTo：没有这个作品时 ok:false 并写明原因', async () => {
+      const x = await switchTo('w99');
+      assert.equal(x.r.ok, false);
+      assert.match(x.r.detail, /到底/);
+      assert.equal(x.probe.current, 'w00');
+    });
+    test('读适配器 switchTo：没找到时关掉抽屉，下一个作品照常切过去', async () => {
+      const x = await switchTo('w99', {}, 'w44');
+      assert.equal(x.r.ok, false);
+      assert.equal(x.afterFirst.drawerOpen, false);
+      assert.equal(x.r2.ok, true, JSON.stringify(x.r2));
+      assert.equal(x.probe.current, 'w44');
+    });
+    test('读适配器 switchTo：作品列表一直没出来，也关掉抽屉', async () => {
+      const x = await switchTo('w05', { listMs: 2000 }, null, { drawerDelay: 600000 });
+      assert.equal(x.r.ok, false);
+      assert.match(x.r.detail, /作品列表没出来/);
+      assert.equal(x.probe.drawerOpen, false);
+    });
+    test('读适配器 switchTo：抽屉卡片认不出作品 id 时，不把页头的当前作品当成卡片点', async () => {
+      const x = await switchTo('w00', { listMs: 3000 }, null, { noCardIds: '1', drawerDelay: 300 });
+      assert.equal(x.r.ok, false, JSON.stringify(x.r));
+      assert.match(x.r.detail, /作品列表没出来/);
+      assert.equal(x.probe.drawerOpen, false);
+    });
+    test('读适配器 switchTo：点遮罩关不掉时点右上角关闭', async () => {
+      const x = await switchTo('w99', {}, 'w44', { maskClosable: '0' });
+      assert.equal(x.afterFirst.drawerOpen, false);
+      assert.equal(x.r2.ok, true, JSON.stringify(x.r2));
+    });
+  });
+
   describe('视频号', () => {
     const s = space('chw');
     const base = { uid: 'v2_me', nickname: '麦田测试号', test: { loginFromPage: true } };

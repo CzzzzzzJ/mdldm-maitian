@@ -10,7 +10,7 @@ import { open, atLogin, bigJson, capCount, captured, clickMarked, installHook, m
 import { adapterFail, clip, isoOf, numOrNull, okResult, str } from './shape.mjs';
 
 export const FILE = 'douyin.mjs';
-export const LIMITS = { maxWorks: 8, maxAgeDays: 30, maxExpand: 25, loadMs: 90000 };
+export const LIMITS = { maxWorks: 8, maxAgeDays: 30, maxExpand: 25, loadMs: 90000, maxPickerPages: 10 };
 const COMMENT_PAGE = 'https://creator.douyin.com/creator-micro/interactive/comment';
 const DM_PAGE = 'https://creator.douyin.com/creator-micro/data/following/chat';
 const SELECT = 'comment/list/select';
@@ -58,12 +58,17 @@ async function rawComments(page, o) {
   for (const end = Date.now() + o.loadMs; Date.now() < end; await sleep(1500)) if (await page.evaluate(new Function(`return !!(${PICKER_SRC})()`))) break;
   const windowStartMs = o.now - o.maxAgeDays * 86400_000;
   const recent = items.filter((x) => x.comment_count > 0 && (publishedAt(x.create_time) ?? o.now) >= windowStartMs).slice(0, o.maxWorks);
+  // 默认作品的一楼列表比「选择作品」按钮晚到；先切走的话，它晚到的响应会把列表盖回默认作品（2026-11-21 实测）
+  if (recent.length) await waitCaptured(page, SELECT, { timeoutMs: 30000 });
   const works = [];
   for (const it of recent) {
     const from = await capCount(page);
-    const switched = await switchTo(page, it.item_id_plain);
-    if (!switched) { works.push({ item_id_plain: it.item_id_plain, opened: false }); continue; }
-    const got = await waitCaptured(page, SELECT, { from, timeoutMs: 20000 });
+    const switched = await switchTo(page, it.item_id_plain, { maxPages: o.maxPickerPages });
+    if (!switched.ok) { works.push({ item_id_plain: it.item_id_plain, opened: false }); continue; }
+    // 切到的就是默认作品时页面不重新请求，它的一楼列表开头已经抓到了，不用再等
+    // 只在还没切走过时用（切走后再切回来页面会重新请求，要等新的）
+    const had = !works.some((w) => w.opened) && (await bodies(page, SELECT, 0)).some((j) => j.status_code === 0 && Array.isArray(j.comments) && j.comments.length && j.comments.every((c) => String(c.aweme_id) === it.item_id_plain));
+    const got = had || await waitCaptured(page, SELECT, { from, timeoutMs: 20000 });
     // 列表加载失败时页面显示「点击刷新」，点一次（只读）
     if (!got && await clickMarked(page, `() => [...document.querySelectorAll('[class*=reload-list-]')].find((e) => /点击刷新/.test(e.textContent))`, 'reload comment list')) await waitCaptured(page, SELECT, { from, timeoutMs: 30000 });
     await sleep(1500);
@@ -89,19 +94,66 @@ async function rawComments(page, o) {
 export const EXPAND_SRC = `() => { const re = /^(查看\\s*\\d+\\s*条回复|展开\\s*\\d*\\s*条?更多回复|展开更多)$/; return [...document.querySelectorAll('div, span, button')].filter((e) => re.test(e.textContent.trim()) && ![...e.children].some((c) => re.test(c.textContent.trim()))); }`;
 const PICKER_SRC = `() => [...document.querySelectorAll('button, [class*=-button]')].find((e) => e.textContent.trim() === '选择作品')`;
 
-// 「选择作品」→ 作品列表里 fiber props 的 item_id_plain 等于目标的那一项
-export async function switchTo(page, id) {
-  if (!(await clickMarked(page, PICKER_SRC, 'open work picker'))) return false;
-  await sleep(2500);
-  // 作品列表的类名会变（实测两个版本），按「发布于」文字找项，再沿 fiber 找 props 里 item_id_plain 等于目标的；页头也显示当前作品，取最后一个（抽屉里的）
-  const ok = await clickMarked(page, `() => [...document.querySelectorAll('*')].filter((el) => el.children.length === 0 && /^发布于/.test(el.textContent.trim()) && (() => {
-      for (let e = el, i = 0; e && i < 8; e = e.parentElement, i++) {
-        const k = Object.keys(e).find((k) => k.startsWith('__reactFiber'));
-        for (let f = e[k], j = 0; f && j < 8; f = f.return, j++) { const p = f.memoizedProps; if (p && typeof p === 'object') for (const v of Object.values(p)) if (v && typeof v === 'object' && v.item_id_plain != null) return String(v.item_id_plain) === ${JSON.stringify(id)}; }
-      }
-      return false; })()).at(-1)`, 'pick a work');
-  await sleep(2500);
-  return ok;
+// 抽屉里的作品项：类名会变（实测两个版本），按「发布于」文字找叶子，再沿 fiber 找 props 里的作品对象（item_id_plain）。
+// 只认抽屉（[class*=sidesheet]）里的：页头也显示当前作品的「发布于」，它的 fiber 上也有作品对象（2026-11-21 第二次核对），点它不会切作品。
+const WORK_CARDS = `const cards = () => [...document.querySelectorAll('[class*=sidesheet] *')].filter((el) => el.children.length === 0 && /^发布于/.test(el.textContent.trim()) && el.getClientRects().length > 0).map((el) => {
+    for (let e = el, i = 0; e && i < 8; e = e.parentElement, i++) {
+      const k = Object.keys(e).find((k) => k.startsWith('__reactFiber'));
+      for (let f = e[k], j = 0; f && j < 8; f = f.return, j++) { const p = f.memoizedProps; if (p && typeof p === 'object') for (const v of Object.values(p)) if (v && typeof v === 'object' && v.item_id_plain != null) return { el, id: String(v.item_id_plain) }; }
+    }
+    return null; }).filter(Boolean);`;
+const cardIds = (page) => page.evaluate(new Function(`${WORK_CARDS} return cards().map((c) => c.id);`));
+// 抽屉的滚动容器（最后一个作品项往上第一个能纵向滚动的）滚到底；作品列表每页 20 个，滚到底才请求下一页
+const SCROLL_CARDS = `${WORK_CARDS} const last = cards().at(-1)?.el; if (!last) return false;
+  for (let e = last.parentElement; e; e = e.parentElement) if (e.scrollHeight > e.clientHeight + 5 && /(auto|scroll)/.test(getComputedStyle(e).overflowY)) {
+    e.scrollTop = e.scrollHeight; e.dispatchEvent(new Event('scroll')); return true; }
+  last.scrollIntoView({ block: 'end' }); return true;`;
+
+async function until(fn, ms, stepMs = 250) {
+  for (const end = Date.now() + ms; ;) { const v = await fn(); if (v || Date.now() >= end) return v; await sleep(stepMs); }
+}
+
+// 关掉「选择作品」抽屉：按 Esc；还开着就点遮罩（Semi SideSheet 默认点遮罩关）；还开着就点关闭按钮。每步都确认关了没有。
+// 抽屉开着时遮罩盖住「选择作品」按钮，下一次就打不开了。按抽屉、遮罩节点判开没开（作品列表没出来时抽屉也是开着的）
+const DRAWER_OPEN = `return [...document.querySelectorAll('[class*=sidesheet-inner], [class*=sidesheet-mask]')].some((e) => e.getClientRects().length > 0);`;
+async function closePicker(page) {
+  const closed = async () => !(await page.evaluate(new Function(DRAWER_OPEN)));
+  if (await closed()) return;
+  await page.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => {});
+  await page.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => {});
+  if (await until(closed, 1000)) return;
+  for (const sel of ['[class*=sidesheet-mask]', '[class*=sidesheet-close]']) {
+    await page.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => e.getClientRects().length > 0).at(-1)?.click(), sel);
+    if (await until(closed, 1500)) return;
+  }
+}
+
+/**
+ * 「选择作品」→ 作品列表里 item_id_plain 等于 id 的那一项。返回 { ok, detail }；没切成时关掉抽屉再返回。
+ * 作品列表是打开抽屉后才请求的（实测 0 到 3.3 秒才出来），每页 20 个；目标不在已加载的里面就把抽屉滚到底翻页，
+ * 最多 maxPages 页。抽屉底部「没有更多视频」还有下一页时也显示，所以按「滚了没出新作品 id」判到底（按 id 不按个数，列表复用节点时个数不涨）。
+ */
+export async function switchTo(page, id, { maxPages = LIMITS.maxPickerPages, listMs = 15000, pageMs = 8000 } = {}) {
+  const want = String(id);
+  if (!(await clickMarked(page, PICKER_SRC, 'open work picker'))) return { ok: false, detail: '页面上没有「选择作品」按钮' };
+  const fail = async (detail) => { await closePicker(page); return { ok: false, detail }; };
+  const seen = new Set(await until(async () => { const x = await cardIds(page); return x.length ? x : null; }, listMs) ?? []);
+  if (!seen.size) return fail(`打开「选择作品」${Math.round(listMs / 1000)} 秒内作品列表没出来`);
+  // 上限按实际加载的作品个数算（第一页的个数当每页大小）：滚动可能多带出一页，只在前 maxPages 页的作品里找
+  const cap = seen.size * maxPages;
+  for (;;) {
+    const picked = await clickMarked(page, `() => { ${WORK_CARDS} return cards().slice(0, ${cap}).filter((c) => c.id === ${JSON.stringify(want)}).at(-1)?.el ?? null; }`, 'pick a work');
+    if (picked) { await sleep(2500); return { ok: true, detail: null }; }
+    if (seen.size >= cap) return fail(`作品列表翻了 ${maxPages} 页（前 ${cap} 个作品）到上限，还没有这个作品`);
+    // 先看有没有新作品，没有再滚（上一页刚渲染完时那一下滚动可能没触发加载，所以等的时候反复滚）
+    const grew = await until(async () => {
+      const fresh = (await cardIds(page)).filter((x) => !seen.has(x));
+      if (fresh.length) { fresh.forEach((x) => seen.add(x)); return true; }
+      await page.evaluate(new Function(SCROLL_CARDS));
+      return false;
+    }, pageMs, 500);
+    if (!grew) return fail(`作品列表翻到底了（${seen.size} 个作品），没有这个作品`);
+  }
 }
 
 /**
