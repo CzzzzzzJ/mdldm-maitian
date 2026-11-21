@@ -1,20 +1,25 @@
 // 「自有站点」接口（可选）：你自己的课程站 / 会员站。不配 config.site 就整块关掉——
-// 不建课、不采站点流量和注册，网页上也不显示站点那一格和「转化」页。
+// 未配置时，转化页展示接入说明。站点数据与建课操作只在启用对应站点时开放。
 //
 // 站点需要提供两个接口（用浏览器里管理员登录态去调，麦田不存密码）：
 //   coursesApi   GET → { courses: [{ _id, title, seriesId, visibilityStatus: 'published'|..., viewCount, publishedAt }] }
 //   dashboardApi GET → { funnel: { totalRegistered }, registrationTrend: [{ date, count, vipCount }], revenueTrend: [{ date, count, revenue }],
 //                        channelStats: [{ source, registeredCount, vipCount, orderCount, revenue }], campaignStats?: [{ campaign, sources, ... }] }
 // 建课（上传成片）走发布插件里的站点适配器。
-import { config } from './feishu.mjs';
+import { config, onConfigChange } from './feishu.mjs';
+import { configuredPlatforms } from './targets.mjs';
 
-// 启用判定：没有 base 的一律视为未启用（从没配过站点时卡片默认是关）
-export function siteEnabled(s = config.site) { return !!(s && s.base) && s.enabled !== false; }
-// 卡片「启用」开关看的是标志位（哪怕还没填地址），与 SITE 是否可用（要求 base）分开
-export function siteOn(s = config.site) { return !!(s && s.enabled !== false); }
-// 配置改动后重新计算 SITE；ES module 的 live binding 让所有 import 方自动拿到新值
+// 可展示已填写的站点设置；实际采集与建课同时服从统一的平台开关。
+export function siteOn(s = config.site) { return !!s && s.enabled !== false && (s !== config.site || configuredPlatforms(config).includes('zsz')); }
+export function siteEnabled(s = config.site) { return siteOn(s) && !!s.base; }
+export let SITE = null;
+let siteConfig;
 export function refreshSite() {
   const s = siteEnabled() ? config.site : null;
+  // 同一配置在页面轮询时保持同一对象，采集期间可以识别站点变更。
+  const next = JSON.stringify(s);
+  if (siteConfig === next) return SITE;
+  siteConfig = next;
   SITE = s && {
     name: s.name || '知识站',
     base: s.base.replace(/\/$/, ''),
@@ -25,5 +30,5 @@ export function refreshSite() {
   };
   return SITE;
 }
-export let SITE = null;
-SITE = refreshSite();
+onConfigChange(refreshSite);
+refreshSite();

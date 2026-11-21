@@ -25,6 +25,12 @@
 
 > 跑在一台常开的 Mac 上，用你自己登录好的浏览器操作各平台，**不存任何平台密码**。国内四家只填写不发布，最后一下由你自己点。
 
+## 账号流量统计
+
+在「系统」页管理平台和 B 站账号。账号各自使用独立的 Chrome 登录目录，流量页按账号展示已采集的作品。
+
+新增的 B 站账号仅用于流量统计。
+
 ## 看它跑一遍
 
 <p align="center"><img src="https://github.com/CzzzzzzJ/mdldm-maitian/releases/download/media/maitian-publish.gif" alt="一期视频的发布流程：Agent 写文案 → 进分发计划 → 插件分批填写各平台 → 国内平台你来点发布 → 到点回填链接" /></p>
