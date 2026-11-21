@@ -2,9 +2,10 @@
 import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
-import { SITE, siteOn, refreshSite } from './site.mjs';
+import { SITE, siteOn, refreshSite, matchesSiteData } from './site.mjs';
 import { applyFeishuPatch, applySitePatch, saveConfig, testSite } from './config-admin.mjs';
 import { learnOn, learnUrl } from './learn.mjs';
+import { buildSalesSummary, salesDateRange } from './sales.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
@@ -20,7 +21,7 @@ const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
 const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram'];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
-const platformList = () => PLATFORMS.map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
+const platformList = () => PLATFORMS.filter(id => id !== 'zsz' || !SITE?.salesOnly).map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
 
 function episodeView(ep, full = false) {
   const snap = getSnapshot(ep.id), pj = (snap && JSON.parse(snap.project)) || readPj(ep.dir) || { platforms: {} };
@@ -78,11 +79,15 @@ function widgetData() {
   const now = Date.now();
   const pub = latestPublished();
   const ev = pub && episodeView(pub);
-  const days = SITE ? db.prepare('SELECT * FROM site_daily WHERE day >= ? ORDER BY day').all(ago(today, 6)) : [];
+  const siteDay = SITE && SITE.salesOnly ? db.prepare('SELECT MAX(day) day FROM site_daily').get().day || today : today;
+  const days = matchesSiteData(getMeta('siteShopName')) ? db.prepare('SELECT * FROM site_daily WHERE day >= ? AND day <= ? ORDER BY day').all(ago(siteDay, 6), siteDay) : [];
   const zsz = stat('zsz');
+  const salesTotal = key => days.length === 7 && days.every(d => d[key] != null && Number.isFinite(d[key])) ? days.reduce((n, d) => n + Math.round(d[key] * 100), 0) / 100 : null;
+  const revenue = salesTotal('revenue'), refund = salesTotal('refund');
   return { name: config.name || '麦田', owner: W.owner || '', avatar: !!W.avatar, fans: { total: sum('total'), today: sum('today'), week: sum('week') }, platforms,
     latest: ev && { title: ev.short, nick: ev.nick, views: ev.views, inter: ev.inter, hours: Math.round((now - Date.parse(pub.schedule)) / 36e5) },
-    site: SITE && { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) },
+    site: SITE && (SITE.salesOnly ? { name: SITE.name, salesOnly: true, dataThrough: days.length ? siteDay : null, orders: salesTotal('orders'), revenue, refund, net: revenue != null && refund != null ? Math.round((revenue - refund) * 100) / 100 : null }
+      : { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) }),
     metricsDay: getMeta('metricsDay') || '', now: new Date().toISOString() };
 }
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -112,14 +117,14 @@ function thumb(f, w) {
 const metaJson = (k) => { const v = getMeta(k); if (!v) return null; try { return JSON.parse(v); } catch { return null; } };
 function integrations() {
   const cs = config.site || {};
-  const summary = SITE ? (() => {
+  const summary = SITE && !SITE.salesOnly && matchesSiteData(getMeta('siteShopName')) ? (() => {
     const rows = db.prepare("SELECT day, reg, revenue FROM site_daily WHERE day >= date('now','localtime','-7 day')").all();
     return { reg: rows.reduce((n, r) => n + (r.reg || 0), 0), revenue: rows.reduce((n, r) => n + (r.revenue || 0), 0) };
   })() : null;
   return {
     feishu: { webhook: config.feishuWebhook || '', login: W.login === 'feishu', lastTest: metaJson('integrations.feishu.lastTest') },
     site: {
-      enabled: siteOn(), name: cs.name || '', base: cs.base || '',
+      enabled: siteOn(), salesOnly: cs.provider === 'xiaoe', shopName: cs.shopName || '', name: cs.name || '', base: cs.base || '',
       adminPath: cs.adminPath || '/admin', coursesApi: cs.coursesApi || '/api/courses?admin=1',
       dashboardApi: cs.dashboardApi || '/api/admin/dashboard', coursePath: cs.coursePath || '/series/{seriesId}?courseId={id}',
       logo: cs.logo || '', lastTest: metaJson('integrations.site.lastTest'), summary,
@@ -164,10 +169,17 @@ async function handle(req, res) {
     return send(res, 200, widgetPage(widgetScript(req, 'maitian-loader.js')), 'text/html; charset=utf-8');
   }
   if (u.pathname === '/api/overview') {
-    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
+    const salesOnly = !!SITE?.salesOnly, salesNow = Date.now(), range = salesOnly && salesDateRange(salesNow);
+    const readable = matchesSiteData(getMeta('siteShopName'));
+    const siteDays = !readable ? [] : salesOnly ? db.prepare('SELECT * FROM site_daily WHERE day>=? AND day<=? ORDER BY day').all(range.start, range.today) : db.prepare('SELECT * FROM site_daily ORDER BY day').all();
+    const sales = salesOnly ? buildSalesSummary({ days: siteDays, now: salesNow,
+      orders: readable ? db.prepare('SELECT id,title,amount,status,time,kind FROM site_orders ORDER BY time DESC,id DESC LIMIT 10').all() : [],
+      syncedAt: readable && getMeta('siteLiveSyncedAt'), ordersSyncedAt: readable && getMeta('siteOrdersSyncedAt'), error: getMeta('siteError'), ordersError: getMeta('siteOrdersError') }) : null;
+    const episodeRows = episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e));
+    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
-      site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
-        campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },
+      site: { days: siteDays, channels: readable && !salesOnly ? db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all() : [],
+        campaigns: readable && !salesOnly ? db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all() : [], campaignsOn: SITE && !salesOnly && getMeta('siteCampaigns') === 'on', ...(sales && { sales }) },
       metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all(),
       followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
       samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(),
@@ -244,7 +256,7 @@ async function handle(req, res) {
       if (a.type === 'mark' && (a.state !== 'published' || !getEpisode(a.id) || !NAMES[a.platform])) return send(res, 400, { error: '状态不对' });
       // 登录不受「同一时间只跑一个」限制：掉线时正体检着也要能马上打开登录页
       if (actions.some(x => !x.done && x.type !== 'mark') && !['mark', 'login'].includes(a.type)) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
-      const rec = { type: a.type, platform: a.platform && PLATFORMS.includes(a.platform) ? a.platform : '', label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: '同步知识站数据', followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+      const rec = { type: a.type, platform: a.platform && PLATFORMS.includes(a.platform) ? a.platform : '', label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: `同步${SITE ? SITE.name : '知识站'}数据`, followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
       actions.push(rec);
       const ch = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...argv], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
       const on = (d) => { rec.tail = (rec.tail + d).slice(-600); }; ch.stdout.on('data', on); ch.stderr.on('data', on);

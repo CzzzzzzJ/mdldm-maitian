@@ -98,7 +98,7 @@ export async function ytSubmit(tabId, title, scheduleIso) {
 
 // 知识站：同标题课程数量和状态
 export async function zszCourses(title) {
-  if (!SITE) return [];
+  if (!SITE || SITE.salesOnly) return [];
   return withTab(SITE.admin, (id) => evaluate(id, `fetch(${JSON.stringify(SITE.coursesApi)},{credentials:'include'}).then(r=>r.json()).then(d=>(d.courses||[]).filter(c=>c.title===${JSON.stringify(title)}).map(c=>({id:c._id,vis:c.visibilityStatus,seriesId:c.seriesId})))`));
 }
 

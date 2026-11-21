@@ -1,9 +1,12 @@
 // 飞书多维表格看板：期数、平台发布、每日流量、知识站每日、渠道转化。中控单向写入，按 key 更新不重复。
 import fs from 'node:fs'; import path from 'node:path'; import { execFile } from 'node:child_process'; import { fileURLToPath } from 'node:url';
-import { db, NAMES, STATE_CN, episodes, getTasks, setMeta } from './db.mjs';
-import { config } from './feishu.mjs';
+import { db, NAMES, STATE_CN, episodes, getTasks, setMeta, getMeta } from './db.mjs';
+import { config, CFG } from './feishu.mjs';
 import { evaluate, withTab } from './driver.mjs';
 import { SITE } from './site.mjs';
+import { randomUUID } from 'node:crypto';
+import { saveXiaoeLive } from './xiaoe-live.mjs';
+import { fetchXiaoeSnapshot, saveXiaoeDays } from './xiaoe.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const B = config.board;
@@ -45,8 +48,45 @@ const short = (name) => name.split(/[｜|]/)[0].trim();
 const campaign = (dir) => { try { const pj = JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8')); return (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || ''; } catch { return ''; } };
 
 // 知识站后台的汇总数据（只读）：每日注册/会员/订单/收入，按渠道的注册和转化
-export async function fetchSite() {
-  if (!SITE) throw new Error('没配置自有站点（config.site）');
+export async function fetchSite({ history = true } = {}) {
+  const site = SITE;
+  if (!site) throw new Error('自有站点未启用');
+  if (site.salesOnly) {
+    const owner = randomUUID(), until = Date.now() + 120000;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (Number(getMeta('siteSyncUntil')) > Date.now()) throw new Error('销售同步正在进行');
+      setMeta('siteSyncUntil', until); setMeta('siteSyncOwner', owner);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    let failure = null;
+    try {
+      const snapshot = await fetchXiaoeSnapshot(site, { history });
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (getMeta('siteSyncOwner') !== owner || Number(getMeta('siteSyncUntil')) <= Date.now()) throw new Error('销售同步租约已过期，请重试');
+        const saved = JSON.parse(fs.readFileSync(CFG, 'utf8')).site;
+        if (SITE !== site || !saved || saved.enabled === false || saved.provider !== 'xiaoe' || saved.shopName !== site.shopName || saved.base?.replace(/\/$/, '') !== site.base) throw new Error('销售站点配置已变更，请重新同步');
+        if (snapshot.days) { saveXiaoeDays(db, snapshot.days, site.shopName); setMeta('siteHistoryDay', snapshot.today.day); }
+        saveXiaoeLive(db, snapshot.today, snapshot.orders, site.shopName, { ordersError: snapshot.ordersError });
+        if (snapshot.error) setMeta('siteError', snapshot.error);
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+      const rows = [...(snapshot.days || []), snapshot.today];
+      return { days: Object.fromEntries(rows.map(({ day, ...r }) => [day, { ...r, reg: null, vip: null }])), channels: [] };
+    } catch (e) { failure = e; throw e; }
+    finally {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (getMeta('siteSyncOwner') === owner) {
+          if (failure) setMeta('siteError', failure.message.slice(0, 200));
+          setMeta('siteSyncUntil', 0); setMeta('siteSyncOwner', '');
+        }
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+    }
+  }
+  if (getMeta('siteShopName')) throw new Error('该数据库已绑定小鹅通店铺，请为其他站点使用独立数据库');
   const d = await withTab(SITE.admin, (t) => evaluate(t, `fetch(${JSON.stringify(SITE.dashboardApi)},{credentials:'include'}).then(r=>r.ok?r.json():null).then(x=>x&&({reg:x.registrationTrend,rev:x.revenueTrend,ch:x.channelStats,camp:x.campaignStats||null}))`), { wait: 8000 });
   if (!d) throw new Error('知识站后台数据没读到（管理员登录过期？）');
   const days = {};
@@ -63,8 +103,23 @@ export async function fetchSite() {
   return { days, channels: d.ch || [] };
 }
 
+// 实时销售复用守护循环，十分钟至多读取一次；失败也等待下个间隔，避免密集重试。
+export async function syncSalesIfDue(now = Date.now()) {
+  if (!SITE?.salesOnly) return null;
+  const last = Math.max(Date.parse(getMeta('siteLiveSyncedAt') || '') || 0, Number(getMeta('siteSalesAttempt')) || 0);
+  if (now - last < 10 * 60000) return null;
+  setMeta('siteSalesAttempt', now);
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  return fetchSite({ history: getMeta('siteHistoryDay') !== day });
+}
+
 export async function boardSync({ site = true } = {}) {
-  if (!B) return null;
+  const localSales = site && SITE?.salesOnly ? await fetchSite() : null;
+  if (!B) {
+    if (!localSales) return null;
+    const dates = Object.keys(localSales.days).sort();
+    return { 本地站点数据: dates.length, 截止: dates.at(-1) };
+  }
   const eps = episodes(), out = {};
   const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
   const epRows = [], taskRows = [], pubDays = {};
@@ -91,7 +146,7 @@ export async function boardSync({ site = true } = {}) {
 
   if (site) {
     try {
-      const s = await fetchSite();
+      const s = localSales || await fetchSite();
       out.知识站每日 = await upsert('site', Object.entries(s.days).map(([day, v]) => ({ key: day, fields: { 日期文本: day, 日期: `${day} 00:00`, 新注册: v.reg, 新增会员: v.vip, 订单数: v.orders || 0, 收入: v.revenue || 0, 当天发布: (pubDays[day] || []).join('；') } })));
       out.渠道转化 = await upsert('channels', s.channels.map(c => ({ key: c.source, fields: { 渠道: SRC[c.source] || c.source, 注册数: c.registeredCount || 0, 会员数: c.vipCount || 0, 订单数: c.orderCount || 0, 收入: c.revenue || 0, 会员转化率: c.registeredCount ? Math.round((c.vipCount || 0) / c.registeredCount * 1000) / 1000 : 0, 更新时间: nowTs() } })));
     } catch (e) { out.知识站 = `没同步：${e.message}`; }

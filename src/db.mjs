@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS tasks (episode_id TEXT, platform TEXT, state TEXT, de
 CREATE TABLE IF NOT EXISTS metrics (day TEXT, episode_id TEXT, platform TEXT, views INTEGER, likes INTEGER, comments INTEGER, favorites INTEGER, shares INTEGER, extra TEXT, collected_at TEXT, PRIMARY KEY (day, episode_id, platform));
 CREATE TABLE IF NOT EXISTS board_records (tbl TEXT, key TEXT, record_id TEXT, PRIMARY KEY (tbl, key));
 CREATE TABLE IF NOT EXISTS site_daily (day TEXT PRIMARY KEY, reg INTEGER, vip INTEGER, orders INTEGER, revenue REAL);
+CREATE TABLE IF NOT EXISTS site_orders (id TEXT PRIMARY KEY, title TEXT, amount REAL, status TEXT, time TEXT, kind TEXT);
+CREATE INDEX IF NOT EXISTS site_orders_time ON site_orders(time DESC, id DESC);
 CREATE TABLE IF NOT EXISTS snapshots (episode_id TEXT PRIMARY KEY, taken_at TEXT, project TEXT);
 CREATE TABLE IF NOT EXISTS site_campaigns (campaign TEXT PRIMARY KEY, sources TEXT, reg INTEGER, vip INTEGER, orders INTEGER, revenue REAL, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS samples (ts TEXT, episode_id TEXT, platform TEXT, views INTEGER, likes INTEGER, comments INTEGER, favorites INTEGER, shares INTEGER, PRIMARY KEY (ts, episode_id, platform));
@@ -21,6 +23,10 @@ CREATE TABLE IF NOT EXISTS site_channels (source TEXT PRIMARY KEY, label TEXT, r
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, episode_id TEXT, platform TEXT, action TEXT, result TEXT);
 `);
+const siteColumns = new Set(db.prepare('PRAGMA table_info(site_daily)').all().map(c => c.name));
+for (const [name, type] of [['refund', 'REAL'], ['paid_users', 'INTEGER'], ['visitors', 'INTEGER']]) {
+  if (!siteColumns.has(name)) db.exec(`ALTER TABLE site_daily ADD COLUMN ${name} ${type}`);
+}
 const now = () => new Date().toISOString();
 export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', zsz: '知识站' };
 // 已经到位、不允许再跑的状态（防重）

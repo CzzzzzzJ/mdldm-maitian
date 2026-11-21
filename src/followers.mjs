@@ -54,7 +54,7 @@ export const followerCollectors = {
     const total = num(n); return total != null && { total, history: [] };
   },
   async zsz() {   // 知识站的「粉丝」= 注册用户
-    if (!SITE) return null;
+    if (!SITE || SITE.salesOnly) return null;
     const r = await withTab(SITE.admin, (t) => evaluate(t, `${get(SITE.dashboardApi)}.then(x=>({total:x.funnel.totalRegistered,trend:x.registrationTrend||[]}))`));
     return r && r.total != null && { total: r.total, todayNet: (r.trend[r.trend.length - 1] || {}).count || 0, history: r.trend.slice(0, -1).map(x => ({ day: x.date, net: x.count, gain: x.count, loss: 0 })) };
   },
@@ -78,7 +78,7 @@ export function saveFollowers(platform, r) {
 export async function collectFollowers(only, skip = []) {
   const out = {}, off = new Set([...(config.disabled || []), ...skip]);
   for (const [p, fn] of Object.entries(followerCollectors)) {
-    if ((only && !only.includes(p)) || off.has(p)) continue;
+    if ((p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p)) continue;
     try { const r = await fn(); if (!r) { out[p] = '没读到'; continue; } const n = saveFollowers(p, r); out[p] = { total: r.total, backfilled: n }; }
     catch (e) { out[p] = '出错：' + e.message.slice(0, 80); }
   }

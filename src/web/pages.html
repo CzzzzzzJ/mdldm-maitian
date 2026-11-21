@@ -79,6 +79,7 @@ function vTraffic() {
 }
 
 function vConvert() {
+  if (O.siteSalesOnly) return vSales();
   if (!O.siteOn) return `<div class="h1">转化</div><p class="lead">还没接你自己的站点。</p>
   <div class="panel" style="padding:18px 20px;line-height:1.8;font-size:14px;color:var(--t2)">
     <p style="margin:0 0 10px">有课程站、会员站或者自己的产品，就能在这里看到：哪一期、哪个平台带来了注册和付费，每期一条「播放 → 注册 → 会员 → 收入」的漏斗。</p>
@@ -103,6 +104,45 @@ function vConvert() {
         return `<tr><td>${e ? `<a href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)}">${epc(e)}</a>` : esc(c.campaign)}<div style="font-size:11.5px;color:var(--t3)">来自 ${esc(c.sources || '–')}</div></td><td class="n">${v ? fmt(v) : '–'}${bar(v, mx, 'var(--accent)')}</td><td class="n"><b>${fmt(c.reg)}</b></td><td class="n">${v ? (c.reg / v * 1e4).toFixed(1) : '–'}</td><td class="n">${fmt(c.vip)}</td><td class="n">${c.reg ? pct(c.vip, c.reg, 1) : '–'}</td><td class="n"><b>¥${fmt(c.revenue)}</b></td><td class="n">${v ? '¥' + (c.revenue / v * 1e3).toFixed(1) : '–'}</td></tr>`; }).join('')}</tbody></table></div>`; })()
     : `<p style="margin:0;color:var(--t2);font-size:13.5px;line-height:1.7">${O.site.campaignsOn ? '已经开始按期记录，还没有人通过视频里的链接注册。' : `现在只能看到哪个渠道带来注册和收入，看不到是哪一期带来的。让${esc(PN.zsz)}记下访客第一次带来的 <code>utm_campaign</code>，并在 dashboardApi 里返回 <code>campaignStats</code>，这里就会出现每期的转化漏斗（见 README「接入你自己的站点」）。`}</p>`}</div>
   <div class="btns" style="margin-top:18px">${abtn({ type: 'board' }, `现在同步${esc(PN.zsz)}数据`)}</div>`;
+}
+
+const salesMoney = n => n == null ? '–' : '¥' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const salesTotal = (rows, key) => rows.length && rows.every(r => r[key] != null && Number.isFinite(r[key])) ? rows.reduce((n, r) => n + Math.round(r[key] * 100), 0) / 100 : null;
+function vSales() {
+  const s = O.site.sales;
+  if (!s) return vSalesLegacy();
+  const trend = s.trend || [], sync = abtn({ type: 'board' }, `同步${esc(PN.zsz)}数据`, 'pri');
+  after = () => {
+    drawCols($('#c-sales-revenue'), trend.map(r => ({ x: r.day.slice(5), y: r.revenue })), '¥');
+    drawCols($('#c-sales-orders'), trend.map(r => ({ x: r.day.slice(5), y: r.orders })));
+  };
+  return `<div class="sales-page-title"><div class="h1">${esc(PN.zsz)}销售</div><time>${esc(s.today)} · 更新 ${esc(salesUpdated(s.syncedAt))}</time>${sync}</div>
+  <div class="panel sales-summary">${salesPeriods(s)}</div>${s.error ? `<p class="sales-error" role="status">${esc(s.error)}</p>` : ''}
+  <div class="grid g2 sales-page-charts"><div class="panel"><div class="ph"><h3>近 30 天支付金额</h3></div><div class="chartbox" id="c-sales-revenue" role="img" aria-label="近 30 天支付金额趋势"></div></div><div class="panel"><div class="ph"><h3>近 30 天支付订单</h3></div><div class="chartbox" id="c-sales-orders" role="img" aria-label="近 30 天支付订单趋势"></div></div></div>
+  ${sec('订单动态', `更新 ${esc(salesUpdated(s.ordersSyncedAt))}`)}<div class="panel sales-activity sales-activity-full">${salesOrders(s, 10)}</div>
+  ${sec('每日销售')}<div class="panel"><div class="tw"><table aria-label="每日销售数据"><thead><tr><th scope="col">日期</th><th scope="col" class="n">支付订单</th><th scope="col" class="n">支付金额</th><th scope="col" class="n">退款金额</th><th scope="col" class="n">支付净额</th></tr></thead><tbody>${[...trend].reverse().map(r => `<tr><td>${esc(r.day)}${r.provisional ? '<small>进行中</small>' : ''}</td><td class="n">${fmt(r.orders)}</td><td class="n">${salesMoney(r.revenue)}</td><td class="n">${salesMoney(r.refund)}</td><td class="n">${salesMoney(r.revenue != null && r.refund != null ? Math.round((r.revenue - r.refund) * 100) / 100 : null)}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function vSalesLegacy() {
+  const d = O.site.days, title = `<div class="h1">${esc(PN.zsz)}销售</div>`;
+  const sync = abtn({ type: 'board' }, `同步${esc(PN.zsz)}数据`, 'pri');
+  if (!d.length) return `${title}<div class="panel empty">未同步</div><div class="btns" style="margin-top:18px">${sync}${O.siteError ? `<span role="status">${esc(O.siteError)}</span>` : ''}</div>`;
+  const end = d[d.length - 1].day, start = new Date(end + 'T12:00:00'); start.setDate(start.getDate() - 6);
+  const week = d.filter(r => r.day >= dayStr(start) && r.day <= end), total = key => week.length === 7 ? salesTotal(week, key) : null;
+  const revenue = total('revenue'), refund = total('refund'), net = revenue != null && refund != null ? Math.round((revenue - refund) * 100) / 100 : null;
+  after = () => {
+    drawCols($('#c-sales-revenue'), d.filter(r => r.revenue != null).map(r => ({ x: r.day.slice(5), y: r.revenue })), '¥');
+    drawCols($('#c-sales-orders'), d.filter(r => r.orders != null).map(r => ({ x: r.day.slice(5), y: r.orders })));
+  };
+  return `${title}${sec('近 7 天', `截至 ${esc(end)}`)}
+  <div class="grid g4">${tile('支付订单', fmt(total('orders')))}${tile('支付金额', salesMoney(revenue))}${tile('退款金额', salesMoney(refund))}${tile('支付净额', salesMoney(net), '支付金额减当日退款，非结算到账')}</div>
+  <div class="grid g2" style="margin-top:var(--gap)"><div class="panel"><div class="ph"><h3>每日支付金额</h3></div><div class="chartbox" id="c-sales-revenue" role="img" aria-label="每日支付金额柱状图"></div></div>
+    <div class="panel"><div class="ph"><h3>每日支付订单</h3></div><div class="chartbox" id="c-sales-orders" role="img" aria-label="每日支付订单柱状图"></div></div></div>
+  ${sec('每日销售')}
+  <div class="panel"><div class="tw"><table aria-label="每日销售数据"><thead><tr><th scope="col">日期</th><th scope="col" class="n">支付订单</th><th scope="col" class="n">支付金额</th><th scope="col" class="n">退款金额</th><th scope="col" class="n">支付净额</th></tr></thead><tbody>
+    ${[...d].reverse().map(r => `<tr><td>${esc(r.day)}</td><td class="n">${fmt(r.orders)}</td><td class="n">${salesMoney(r.revenue)}</td><td class="n">${salesMoney(r.refund)}</td><td class="n">${salesMoney(r.revenue != null && r.refund != null ? Math.round((r.revenue - r.refund) * 100) / 100 : null)}</td></tr>`).join('')}
+  </tbody></table></div></div>
+  <div class="btns" style="margin-top:18px">${sync}${O.siteError ? `<span role="status">${esc(O.siteError)}</span>` : ''}</div>`;
 }
 
 function vCalendar() {
@@ -139,8 +179,8 @@ async function vEpisode(id) {
   ${sec('各平台')}
   <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th>状态</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th></th></tr></thead><tbody>
     ${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => { const m = t.m || {}, u = safeUrl(t.url); return `<tr><td>${logo(t.platform)}${esc(PN[t.platform] || t.name)}</td><td>${chip(t)}</td><td class="n"><b>${fmt(m.views)}</b></td><td class="n">${fmt(m.likes)}</td><td class="n">${fmt(m.comments)}</td><td class="n">${fmt(m.favorites)}</td><td class="n">${fmt(m.shares)}</td><td class="n">${m.views ? pct(inter(m), m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : `<span style="color:var(--t3)">${esc(t.detail).slice(0, 18)}</span>`}</td></tr>`; }).join('')}</tbody></table></div></div>
-  ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
-    ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
+  ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn && !O.siteSalesOnly ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
+    ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn && !O.siteSalesOnly ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
   ${sec('播放走势', '每次采样一个点')}<div class="panel"><div class="chartbox" id="c-line"></div></div>
   ${sec('当时发的文案', e.snapshotAt ? `存档于 ${when(e.snapshotAt)}` : '没有存档，显示的是工程目录里现在的内容')}
   <div class="panel">${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => `<details><summary>${logo(t.platform)}<b>${esc(PN[t.platform] || t.name)}</b><span>${esc(t.copy.title || t.copy.body.slice(0, 50))}</span></summary>${t.copy.title ? `<div class="copy"><b>${esc(t.copy.title)}</b></div>` : ''}${t.copy.body ? `<div class="copy">${esc(t.copy.body)}</div>` : ''}${t.copy.tags.length ? `<div style="margin-top:8px;font-size:12.5px;color:var(--t3)">${t.copy.tags.map(x => '#' + esc(x)).join('  ')}</div>` : ''}${t.shot ? `<img class="shot" loading="lazy" src="/shot?id=${encodeURIComponent(e.id)}&p=${t.platform}" alt="提交前的页面截图">` : ''}</details>`).join('')}</div>
@@ -182,6 +222,7 @@ const siteVals = () => { const s = itg().site, d = siteDraft || {}; return {
 }; };
 const siteBody = () => {
   const s = itg().site, v = siteVals();
+  if (s.salesOnly) return `<div class="site-off">${esc(s.shopName)} · ${s.enabled ? '已启用小鹅通销售同步' : '销售同步已停用'}</div>${s.enabled ? '<button type="button" class="btn" data-site="test">测试连接</button>' : ''}`;
   if (!s.enabled) return '<div class="site-off">未启用 · 打开后填写站点配置；停用期间转化页、建课和站点数据同步都会关闭。</div>';
   const field = (id, lab, val) => `<label class="lab" for="${id}">${lab}</label><input class="inp" id="${id}" value="${esc(val || '')}">`;
   return `<div class="istate" id="site-state">${siteState(s)}</div>
@@ -245,7 +286,7 @@ async function render() {
   if (fsDraft != null) { const wh = $('#fs-webhook'); if (wh) wh.value = fsDraft; }
 }
 async function load() {
-  try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
+  try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); PL = PL_ALL.filter(p => !off.has(p) && ((O.siteOn && !O.siteSalesOnly) || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
   catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }

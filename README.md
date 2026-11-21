@@ -186,6 +186,30 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 </details>
 
 <details>
+<summary><b>接入小鹅通销售看板（可选）</b></summary>
+
+在本地 `config.json` 中配置店铺，然后重启麦田。将 `shopName` 填为后台显示的完整店铺名。
+
+```json
+{
+  "site": {
+    "provider": "xiaoe",
+    "enabled": true,
+    "name": "小鹅通",
+    "shopName": "你的店铺名称",
+    "base": "https://admin.xiaoe-tech.com",
+    "adminPath": "/t/merchant/index"
+  }
+}
+```
+
+运行 `node src/hub.mjs login --only zsz`，在麦田专用 Chrome 中登录并进入店铺。运行 `node src/hub.mjs board` 首次同步，随后可在大屏和「销售」查看当天、近 7 天、近 30 天的支付、退款、订单及最近 10 笔订单。守护进程每 10 分钟更新一次，按北京时间每日补齐最近 30 个完整自然日。订单仅保存编号、商品、金额、状态和下单时间。销售模式下，小鹅通不参与课程发布。
+
+已结束日期的退款来自每日统计。需要当天退款时，可在 `site.refundQuery` 中填写当前店铺后台「退款趋势图」查询的 JSON 请求体（只需请求体，无需请求头或 Cookie）。同步时会自动替换日期，按「退款金额」字段取值。缺少当天报表或数据时，退款和支付净额显示为「–」。每个销售数据库绑定一家店铺，换店时请使用单独的 `MAITIAN_DB` 数据库路径。
+
+</details>
+
+<details>
 <summary><b>接入你自己的站点（可选，二次开发）</b></summary>
 
 不配 `config.site` 就整块关掉，网页上不显示站点卡片，「转化」页只说明怎么接。要看转化：

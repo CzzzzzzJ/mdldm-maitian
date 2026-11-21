@@ -20,6 +20,7 @@ const C = {
 const fmt = n => (n == null ? '–' : Number(n).toLocaleString('en-US'));
 const sign = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + fmt(Math.abs(n || 0));
 const money = n => '¥' + fmt(Math.round(n || 0));
+const salesMoney = n => n == null ? '–' : '¥' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const short = n => (n >= 1e4 ? (n / 1e4).toFixed(n >= 1e5 ? 0 : 1) + '万' : fmt(n));
 const fam = config.widgetFamily || 'medium';
 const LOCK = fam.startsWith('accessory');
@@ -102,8 +103,9 @@ function fansBlock(st, size, onDark) {
 }
 function siteRows(st) {
   const s = data.site; if (!s) return;
-  text(st, `${s.name} · 近 7 天`, 10.5, C.dim, 'medium'); st.addSpacer(2);
+  text(st, s.salesOnly ? `${s.name} · ${s.dataThrough ? '截至 ' + s.dataThrough.slice(5) : '未同步'}` : `${s.name} · 近 7 天`, 10.5, C.dim, 'medium'); st.addSpacer(2);
   const r = st.addStack(); r.centerAlignContent();
+  if (s.salesOnly) { text(r, `7天支付 ${salesMoney(s.revenue)}`, 12, C.gold); r.addSpacer(6); text(r, `订单 ${fmt(s.orders)}`, 12, C.ink); return; }
   text(r, `注册 ${fmt(s.reg)}`, 12, C.ink); r.addSpacer(6); text(r, `会员 ${fmt(s.vip)}`, 12, C.ink); r.addSpacer(6); text(r, money(s.revenue), 12, C.gold);
 }
 function platformGrid(st, cols, size = 13, rows = 2) {
@@ -169,7 +171,7 @@ if (!data) {
   if (data.site) {
     const l3 = w.addStack(); l3.centerAlignContent();
     const i3 = l3.addImage(sym('yensign.circle.fill', 10)); i3.imageSize = new Size(10, 10); l3.addSpacer(4);
-    const t3 = l3.addText(`7天 ${money(data.site.revenue)} · 会员 ${fmt(data.site.vip)}`); t3.font = Font.mediumRoundedSystemFont(12); t3.lineLimit = 1; t3.minimumScaleFactor = 0.7;
+    const t3 = l3.addText(data.site.salesOnly ? `7天支付 ${salesMoney(data.site.revenue)} · 订单 ${fmt(data.site.orders)}` : `7天 ${money(data.site.revenue)} · 会员 ${fmt(data.site.vip)}`); t3.font = Font.mediumRoundedSystemFont(12); t3.lineLimit = 1; t3.minimumScaleFactor = 0.7;
   }
 } else if (fam === 'small') {
   w.backgroundGradient = bgGradient(); w.setPadding(13, 14, 13, 14);
@@ -177,7 +179,7 @@ if (!data) {
   const who = h.addStack(); who.layoutVertically(); text(who, data.owner || data.name || '麦田', 12); text(who, stale ? '⚠︎ 旧数据' : (data.owner ? data.name || '麦田' : ''), 10, stale ? C.down : C.dim, 'medium');
   w.addSpacer();
   fansBlock(w, 26);
-  if (data.site) { w.addSpacer(3); const r = w.addStack(); text(r, '7天 ', 10.5, C.dim, 'medium'); text(r, money(data.site.revenue), 11, C.gold); text(r, ` · 会员 ${fmt(data.site.vip)}`, 10.5, C.dim, 'medium'); }
+  if (data.site) { w.addSpacer(3); const r = w.addStack(); text(r, data.site.salesOnly ? '7天支付 ' : '7天 ', 10.5, C.dim, 'medium'); text(r, data.site.salesOnly ? salesMoney(data.site.revenue) : money(data.site.revenue), 11, C.gold); text(r, data.site.salesOnly ? ` · 订单 ${fmt(data.site.orders)}` : ` · 会员 ${fmt(data.site.vip)}`, 10.5, C.dim, 'medium'); }
 } else if (fam === 'medium') {
   w.backgroundGradient = bgGradient(); w.setPadding(13, 15, 13, 15);
   header(w); w.addSpacer(8);

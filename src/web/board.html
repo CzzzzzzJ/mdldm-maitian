@@ -36,6 +36,8 @@ const daysBack = (n) => Array.from({ length: n }, (_, i) => dayStr(new Date(Date
 if (new URLSearchParams(location.search).get('kiosk')) document.body.classList.add('kiosk');
 let O = null, F = {};
 const sum = (arr, k) => arr.reduce((s, r) => s + (r[k] || 0), 0);
+const salesMoney = n => n == null ? '–' : '¥' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const salesTotal = (rows, key) => rows.length && rows.every(r => r[key] != null && Number.isFinite(r[key])) ? rows.reduce((n, r) => n + Math.round(r[key] * 100), 0) / 100 : null;
 const inter = (m) => m ? (m.likes || 0) + (m.comments || 0) + (m.favorites || 0) + (m.shares || 0) : 0;
 const task = (e, p) => e && e.tasks.find(t => t.platform === p);
 const M = (e, p) => (task(e, p) || {}).m || null;
@@ -105,7 +107,7 @@ function insights(cur, ref) {
     if (byF && byF.f > 0) add('', '收藏', `<b>${PN[byF.p]}</b>每 100 次播放有 <b>${(byF.f * 100).toFixed(1)}</b> 个收藏，是各平台里最把这期当干货存的。`);
   }
   // 6 渠道付费
-  if (O.siteOn) {
+  if (O.siteOn && !O.siteSalesOnly) {
     const ch = (O.site.channels || []).filter(c => ['bilibili', 'douyin', 'xiaohongshu', 'twitter', 'youtube'].includes(c.source) && c.reg >= 50).map(c => ({ ...c, r: c.vip / c.reg })).sort((a, b) => b.r - a.r);
     if (ch.length >= 2) { const a = ch[0], z = ch[ch.length - 1]; add('k4', '转化', `知识站里，来自<b>${esc(a.label)}</b>的注册有 <b>${(a.r * 100).toFixed(1)}%</b> 成了会员；${esc(z.label)} 带来 ${fmt(z.reg)} 个注册，只有 ${(z.r * 100).toFixed(1)}%。`); }
   }
@@ -141,6 +143,61 @@ const fixTabs = () => { const c = document.querySelector('.ctabs'), o = c && c.q
 setInterval(() => { if (SL.length > 1 && Date.now() > PAUSE && !document.hidden && !($('#hero') && $('#hero').matches(':hover'))) show(HI + 1); }, 9000);
 document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('.ct'); if (b) { e.preventDefault(); show(+b.dataset.i, true); } });
 
+function salesStrip(days) {
+  if (!days.length) return `<a class="panel strip" href="/p#/convert"><h3>${esc(PN.zsz)}</h3><span>未同步</span><span class="go">销售详情 ›</span></a>`;
+  const end = days[days.length - 1].day, start = new Date(end + 'T12:00:00'); start.setDate(start.getDate() - 6);
+  const week = days.filter(r => r.day >= dayStr(start) && r.day <= end), total = key => week.length === 7 ? salesTotal(week, key) : null;
+  const revenue = total('revenue'), refund = total('refund'), net = revenue != null && refund != null ? Math.round((revenue - refund) * 100) / 100 : null;
+  return `<a class="panel strip" href="/p#/convert"><h3>${esc(PN.zsz)} · 近 7 天</h3><span>支付订单<b>${fmt(total('orders'))}</b></span><span>支付金额<b>${salesMoney(revenue)}</b></span><span>退款金额<b>${salesMoney(refund)}</b></span><span>支付净额<b>${salesMoney(net)}</b></span><span class="feedline">截至 ${esc(end)}</span><span class="go">销售详情 ›</span></a>`;
+}
+
+
+const salesUpdated = value => value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) : '未同步';
+function salesPeriods(s) {
+  return `<div class="sales-periods">${[['today', '当天'], ['week', '近 7 天'], ['month', '近 30 天']].map(([key, label]) => {
+    const p = s.periods?.[key] || {};
+    return `<section class="sales-period" aria-label="${label}"><h4>${label}${key === 'today' ? '<span class="sales-live">进行中</span>' : ''}</h4><dl><div class="sales-paid"><dt>支付金额</dt><dd>${salesMoney(p.revenue)}</dd></div><div><dt>支付订单</dt><dd>${fmt(p.orders)}</dd></div><div><dt>退款金额</dt><dd>${salesMoney(p.refund)}</dd></div><div><dt>支付净额</dt><dd>${salesMoney(p.net)}</dd></div></dl></section>`;
+  }).join('')}</div>`;
+}
+function salesOrders(s, limit) {
+  const orders = (s.recentOrders || []).slice(0, limit);
+  return `${s.ordersError ? `<p class="sales-error" role="status">${esc(s.ordersError)}</p>` : ''}${orders.length ? `<ol class="sales-orders">${orders.map(o => `<li data-sales-order="${esc(o.id)}"><div class="sales-order-title" title="${esc(o.title)}">${esc(o.title)}</div><b>${salesMoney(o.amount)}</b><time>${esc(o.time?.slice(5, 16) || '–')}</time><span class="sales-state ${['paid','pending','closed','refunded','refunding','partial_refund'].includes(o.kind) ? o.kind : ''}">${esc(o.status)}</span></li>`).join('')}</ol>` : `<div class="sales-empty">${s.ordersSyncedAt ? '暂无订单' : '订单未同步'}</div>`}`;
+}
+function salesChart(rows) {
+  const data = (rows || []).slice(-30), max = niceMax(Math.max(1, ...data.map(r => r.revenue || 0))), w = 640, L = 52, R = 8, T = 12, B = 24, h = 164, band = (w - L - R) / Math.max(1, data.length), y = v => T + (h - T - B) * (1 - v / max);
+  if (!data.length) return '<div class="sales-empty">趋势未同步</div>';
+  return `<svg class="sales-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="近 30 天支付金额趋势">${[0, max / 2, max].map(v => `<line x1="${L}" x2="${w-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-8}" y="${y(v)+4}" text-anchor="end">${v >= 10000 ? v / 10000 + '万' : fmt(v)}</text>`).join('')}${data.map((r, i) => {
+    const valid = r.revenue != null && Number.isFinite(r.revenue), x = L + i * band + band * .18;
+    return `${valid ? `<rect x="${x.toFixed(1)}" y="${y(r.revenue).toFixed(1)}" width="${(band*.64).toFixed(1)}" height="${Math.max(r.revenue > 0 ? 1 : 0, y(0)-y(r.revenue)).toFixed(1)}" rx="2" opacity="${r.provisional ? '.5' : i >= data.length-7 ? '1' : '.35'}"><title>${esc(r.day)} ${salesMoney(r.revenue)}${r.provisional ? ' 进行中' : ''}</title></rect>` : ''}${i === 0 || i === data.length-1 || (i % 7 === 0 && data.length-1-i >= 3) ? `<text x="${(x+band*.32).toFixed(1)}" y="${h-5}" text-anchor="${i === data.length-1 ? 'end' : 'middle'}">${esc(r.day.slice(5))}</text>` : ''}`;
+  }).join('')}</svg>`;
+}
+let salesSyncing = false, salesPoll = null, salesSyncMessage = '';
+function salesDashboard() {
+  const s = O.site.sales;
+  if (!s) return salesStrip(O.site.days);
+  const busy = salesSyncing || (O.actions || []).some(a => a.type === 'board' && !a.done);
+  return `<section class="panel sales-dashboard" aria-label="${esc(PN.zsz)}销售"><header class="sales-header"><h3>${esc(PN.zsz)}</h3><time>更新 ${esc(salesUpdated(s.syncedAt))}</time><div class="sales-controls"><button type="button" class="btn" data-sales-sync aria-label="同步小鹅通数据" ${busy ? 'disabled' : ''}>${busy ? '同步中…' : '同步'}</button><a href="/p#/convert">销售详情 ›</a></div></header>${salesPeriods(s)}
+  ${(s.error || salesSyncMessage) ? `<p class="sales-error" role="status">${esc(s.error || salesSyncMessage)}</p>` : ''}<div class="sales-bottom"><div class="sales-trend"><h4>近 30 天支付金额</h4>${salesChart(s.trend)}</div><div class="sales-activity"><h4>订单动态 <time>${esc(salesUpdated(s.ordersSyncedAt))}</time></h4>${salesOrders(s, 5)}</div></div></section>`;
+}
+async function syncSales() {
+  if (salesSyncing) return;
+  const started = Date.now(), previous = new Set((O.actions || []).filter(a => a.type === 'board').map(a => a.startedAt));
+  salesSyncing = true; salesSyncMessage = ''; render();
+  try {
+    const r = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'board' }) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || '同步失败');
+    await load();
+    const check = () => {
+      const a = (O.actions || []).find(a => a.type === 'board' && a.startedAt && !previous.has(a.startedAt));
+      if ((!a || !a.done) && Date.now() - started <= 120000) return false;
+      if (!a || !a.done) { salesSyncing = false; salesSyncMessage = '同步等待超时，请稍后刷新'; clearInterval(salesPoll); salesPoll = null; render(); return true; }
+      salesSyncing = false; salesSyncMessage = a.ok === false ? '同步失败，请查看系统记录' : ''; clearInterval(salesPoll); salesPoll = null; render(); return true;
+    };
+    if (!check()) salesPoll = setInterval(async () => { await load(); check(); }, 2000);
+  } catch (e) { salesSyncing = false; salesSyncMessage = e.message; render(); }
+}
+document.addEventListener('click', e => { if (e.target.closest('[data-sales-sync]')) syncSales(); });
+
 function loginLight(h) {
   const ps = (h.platforms || []).filter(p => !p.disabled);
   const bad = ps.filter(p => p.state && p.state !== 'ok').length, none = !ps.length || ps.every(p => !p.state);
@@ -152,7 +209,7 @@ function render() {
   const eps = O.episodes, days = O.site.days, h = O.health, now = Date.now();
   // 停用的平台、未启用的知识站都不在大屏显示
   const off = new Set((h.platforms || []).filter(p => p.disabled).map(p => p.id));
-  PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); FANP = FANP_ALL.filter(p => !off.has(p));
+  PL = PL_ALL.filter(p => !off.has(p) && ((O.siteOn && !O.siteSalesOnly) || p !== 'zsz')); FANP = FANP_ALL.filter(p => !off.has(p));
   if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; }
   F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total;
   // 大卡轮播：没全部发完的期 + 48 小时内刚发的期，按发布时间排；默认停在「最近刚发的」，没有就停在「最快要发的」
@@ -184,7 +241,7 @@ function render() {
   const f0 = O.feed[0];
   $('#screen').innerHTML = `
   <div class="top"><div class="logo">麦<i>田</i></div><div class="tag">内容与粉丝监控</div>
-    <div class="nav"><a class="on" href="/">大屏</a><a href="/p#/traffic">流量</a><a href="/p#/calendar">日历</a><a href="/p#/convert">转化</a><a href="/p#/archive">档案</a><a href="/p#/system">系统</a></div>
+    <div class="nav"><a class="on" href="/">大屏</a><a href="/p#/traffic">流量</a><a href="/p#/calendar">日历</a><a href="/p#/convert">${O.siteSalesOnly ? '销售' : '转化'}</a><a href="/p#/archive">档案</a><a href="/p#/system">系统</a></div>
     <div class="lights"><span class="light ok">守护进程 运行中</span><span class="light ${h.nas ? 'ok' : 'bad'}">NAS ${h.nas ? '已挂载' : '读不到'}</span><span class="light ${h.chrome ? 'ok' : 'bad'}">专用浏览器 ${h.chrome ? '在线' : '没开'}</span>
       <span class="light ${lc}">${lt}</span></div>
     <div class="clock" id="clock"></div></div>
@@ -201,7 +258,8 @@ function render() {
 
   <div class="cards" style="--n:${PL.length}">${PL.map(card).join('')}</div>
 
-  ${O.siteOn ? `  <a class="panel strip" href="/p#/convert"><h3>${esc(PN.zsz)} · 近 7 天</h3><span>新注册<b>${fmt(sum(l7, 'reg'))}</b></span><span>新会员<b>${fmt(sum(l7, 'vip'))}</b></span><span>订单<b>${fmt(sum(l7, 'orders'))}</b></span><span>收入<b>¥${fmt(sum(l7, 'revenue'))}</b></span>
+  ${O.siteOn && O.siteSalesOnly ? salesDashboard() : ''}
+  ${O.siteOn && !O.siteSalesOnly ? `  <a class="panel strip" href="/p#/convert"><h3>${esc(PN.zsz)} · 近 7 天</h3><span>新注册<b>${fmt(sum(l7, 'reg'))}</b></span><span>新会员<b>${fmt(sum(l7, 'vip'))}</b></span><span>订单<b>${fmt(sum(l7, 'orders'))}</b></span><span>收入<b>¥${fmt(sum(l7, 'revenue'))}</b></span>
     <span class="feedline">${f0 ? `最近动态：${pad(new Date(f0.ts).getHours())}:${pad(new Date(f0.ts).getMinutes())} ${f0.nick ? '「' + esc(f0.nick) + '」' : ''}${esc(f0.platform)} ${esc(f0.action)}${f0.result ? ' · ' + esc(f0.result) : ''}` : ''}</span><span class="go">转化详情 ›</span></a>` : ''}`;
   draw(); tick(); fixTabs(); if (!render.done) { render.done = true; countUp(); }
 }

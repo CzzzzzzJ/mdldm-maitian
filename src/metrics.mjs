@@ -73,7 +73,7 @@ export const collectors = {
   },
   async zsz({ url, p }) {
     const id = idOf(url, /courseId=(\w+)/);
-    if (!SITE) return null;
+    if (!SITE || SITE.salesOnly) return null;
     const c = await withTab(SITE.admin, (t) => evaluate(t, `fetch(${J(SITE.coursesApi)},{credentials:'include'}).then(r=>r.json()).then(x=>{const c=(x.courses||[]).find(c=>c._id===${J(id)}||c.title===${J(p.title)});return c?{views:c.viewCount||0}:null})`));
     return c && { views: c.views };
   },

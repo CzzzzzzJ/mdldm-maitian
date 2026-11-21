@@ -19,6 +19,10 @@ export function applyFeishuPatch(config, { webhook = '', login = false } = {}) {
 const SITE_DEFAULTS = { name: '知识站', adminPath: '/admin', coursesApi: '/api/courses?admin=1', dashboardApi: '/api/admin/dashboard', coursePath: '/series/{seriesId}?courseId={id}', logo: '' };
 export function applySitePatch(config, p = {}) {
   const prev = config.site || {};
+  if (prev.provider === 'xiaoe') {
+    config.site = { ...prev, enabled: p.enabled === undefined ? prev.enabled !== false : !!p.enabled };
+    return config.site;
+  }
   const pick = (key, dflt) => p[key] !== undefined && p[key] !== null ? String(p[key]) : (prev[key] !== undefined && prev[key] !== null ? String(prev[key]) : dflt);
   const site = {
     enabled: p.enabled !== undefined ? !!p.enabled : (prev.enabled !== false),
@@ -45,6 +49,14 @@ export function saveConfig(config) {
 // ---------- 测试（只读，用调用方给的字段，不写库） ----------
 const dayStr = (t) => new Date(t + 8 * 3600e3).toISOString().slice(0, 10);
 export async function testSite(fields = {}) {
+  if (config.site?.provider === 'xiaoe') {
+    try {
+      const { fetchXiaoe } = await import('./xiaoe.mjs');
+      const s = config.site;
+      await fetchXiaoe({ shopName: s.shopName, admin: s.base.replace(/\/$/, '') + (s.adminPath || '/t/merchant/index') });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
   const base = String(fields.base || '').replace(/\/$/, '');
   if (!base) return { ok: false, error: '先填站点地址' };
   const admin = base + (fields.adminPath || '/admin');
