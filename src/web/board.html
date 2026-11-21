@@ -40,6 +40,117 @@ const inter = (m) => m ? (m.likes || 0) + (m.comments || 0) + (m.favorites || 0)
 const task = (e, p) => e && e.tasks.find(t => t.platform === p);
 const M = (e, p) => (task(e, p) || {}).m || null;
 
+const epAt = (e) => {
+  const raw = e.publishAt || e.schedule || e.createdAt;
+  if (!raw) return NaN;
+  const s = String(raw);
+  const t = s.includes("T") ? Date.parse(s) : Date.parse(s.replace(" ", "T") + (s.length <= 16 ? ":00+08:00" : ""));
+  return Number.isFinite(t) ? t : Date.parse(e.createdAt || "");
+};
+const utcMs = (s) => { const x = String(s || '').replace(' ', 'T'); return Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(x) ? x : x + 'Z'); };
+const METR = () => (O && O.metrics) || [];
+const SAMPS = () => (O && O.samples) || [];
+const epDays = (eid) => { const o = {}; for (const r of METR()) if (r.episode_id === eid) (o[r.day] ||= {})[r.platform] = r; return o; };
+const daySum = (row, k) => PL.reduce((s, p) => s + ((((row || {})[p] || {})[k]) || 0), 0);
+const dayInter = (row) => PL.reduce((s, p) => { const r = (row || {})[p]; return s + (r ? (r.likes || 0) + (r.comments || 0) + (r.favorites || 0) + (r.shares || 0) : 0); }, 0);
+const lastDays = (m) => Object.keys(m).filter(d => daysBack(3).includes(d)).sort();
+const rateOf = (row) => { const v = daySum(row, 'views'); return v ? dayInter(row) / v : 0; };
+function gainOf(eid, f) {
+  const m = epDays(eid), ds = lastDays(m);
+  if (!ds.length) return null;
+  if (ds.length < 2) return { one: true, d: 0 };
+  return { n: ds.length - 1, d: f(m[ds[ds.length - 1]]) - f(m[ds[0]]) };
+}
+const dtag = (g, label = '3 天') => {
+  if (!g) return '<div class="dl mut">还没采到播放</div>';
+  if (g.one) return '<div class="dl"><i class="eq">首日</i><span>刚开测</span></div>';
+  const v = g.d, c = v > 0 ? 'up' : v < 0 ? 'dn' : 'eq';
+  return `<div class="dl"><i class="${c}">${v > 0 ? '▲' : v < 0 ? '▼' : '·'} ${fmt(Math.abs(v))}</i><span>${label}净增</span></div>`;
+};
+function numsHTML(cur) {
+  const live = cur.views > 1;
+  const gv = gainOf(cur.id, (r) => daySum(r, 'views'));
+  const gi = gainOf(cur.id, dayInter);
+  const m = epDays(cur.id), ds = lastDays(m);
+  const gr = ds.length >= 2 ? { d: (rateOf(m[ds[ds.length - 1]]) - rateOf(m[ds[0]])) * 100 } : null;
+  const grh = gr ? `<div class="dl"><i class="${gr.d > 0 ? 'up' : gr.d < 0 ? 'dn' : 'eq'}">${gr.d > 0 ? '▲' : gr.d < 0 ? '▼' : '·'} ${Math.abs(gr.d).toFixed(1)}pt</i><span>3 天</span></div>` : '<div class="dl mut">还没有对比基准</div>';
+  return `<div class="nums">
+    <div><div class="lab">全平台播放</div><div class="val">${live ? fmt(cur.views) : '–'}</div>${live ? dtag(gv) : dtag(null)}</div>
+    <div><div class="lab" title="赞 + 评 + 藏 + 转">互动</div><div class="val">${live ? fmt(cur.inter) : '–'}</div>${live ? dtag(gi) : dtag(null)}</div>
+    <div><div class="lab">互动率</div><div class="val">${live ? pct(cur.inter, cur.views, 1) : '–'}</div>${live ? grh : ''}</div>
+  </div>`;
+}
+function gain3P(eid, p) {
+  const m = epDays(eid), ds = lastDays(m);
+  if (ds.length < 2) return null;
+  const v = (d) => ((((m[d] || {})[p] || {}).views) || 0);
+  return v(ds[ds.length - 1]) - v(ds[0]);
+}
+function compHTML(cur) {
+  const m = epDays(cur.id), ds = Object.keys(m).sort();
+  if (!ds.length) return '';
+  const row = m[ds[ds.length - 1]], tot = daySum(row, 'views');
+  const segs = PL.map(p => ({ p, v: (((row[p] || {}).views) || 0) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+  if (!segs.length) return '';
+  const gains = segs.map(x => ({ p: x.p, d: gain3P(cur.id, x.p) })).filter(x => x.d != null && x.d > 0).sort((a, b) => b.d - a.d);
+  const lead = gains.length ? `${PN[gains[0].p]} ↑${fmt(gains[0].d)}` : ds.length < 2 ? '待对比' : '暂无可比增长';
+  return `<div class="vis-c" title="${segs.map(x => PN[x.p] + ' ' + fmt(x.v) + '（' + pct(x.v, tot, 1) + '）').join(' · ')}">
+    <div class="cb">${segs.map(x => `<i style="flex:${x.v} 1 0;background:var(--p-${x.p})" title="${PN[x.p]} ${fmt(x.v)}（${pct(x.v, tot, 1)}）"></i>`).join('')}</div>
+    <div class="cl">${segs.slice(0, 1).map(x => `<span><i class="dot" style="background:var(--p-${x.p})"></i>${PN[x.p]} <b>${pct(x.v, tot, 0)}</b></span>`).join('')}${segs.length > 1 ? `<span class="mut">+${segs.length - 1} 家</span>` : ''}<span class="sep"></span><span class="lv">${lead}</span></div>
+  </div>`;
+}
+function barsHTML(cur) {
+  const m = epDays(cur.id), ds = daysBack(3);
+  const rows = ds.map(d => ({ d, row: m[d] || null, v: m[d] ? daySum(m[d], 'views') : null }));
+  const max = Math.max(1, ...rows.map(r => r.v || 0));
+  return `<div class="vbox" title="每天累计播放（按平台堆叠）">
+    <div class="bars">${rows.map(r => {
+      if (r.v == null) { const before = Date.parse(r.d + 'T23:59:59+08:00') < epAt(cur); return `<div class="bar"><div class="nov">${before ? '发布前' : '缺数据'}</div></div>`; }
+      const segs = PL.map(p => ({ p, v: (((r.row[p] || {}).views) || 0) })).filter(x => x.v > 0);
+      return `<div class="bar"><div class="bt" style="height:${Math.max(3, r.v / max * 100)}%">${segs.map(x => `<i style="flex:${x.v} 1 0;background:var(--p-${x.p})" title="${PN[x.p]} ${fmt(x.v)}"></i>`).join('')}</div></div>`;
+    }).join('')}</div>
+    <div class="blabs">${rows.map(r => `<span>${r.d.slice(5)}<b>${r.v == null ? '–' : kfmt(r.v)}</b></span>`).join('')}</div></div>`;
+}
+function cumPts(eid, T0) {
+  if (!Number.isFinite(T0)) return [];
+  const rows = SAMPS().filter(r => r.episode_id === eid && PL.includes(r.platform));
+  if (!rows.length) return [];
+  const ts = [...new Set(rows.map(r => r.ts))].sort();
+  const last = {}, out = [];
+  for (const t of ts) {
+    for (const r of rows) if (r.ts === t) last[r.platform] = r.views || 0;
+    out.push({ h: Math.max(0, (utcMs(t) - T0) / 3600e3), v: Object.values(last).reduce((a, b) => a + b, 0) });
+  }
+  return out;
+}
+function lineHTML(cur, prev) {
+  const T0 = epAt(cur), P0 = prev ? epAt(prev) : NaN;
+  if (!Number.isFinite(T0)) return '<div class="vbox" title="发布后累计播放"><div class="lnone">发布后生成曲线</div></div>';
+  const pts = cumPts(cur.id, T0);
+  const pv = prev && Number.isFinite(P0) ? cumPts(prev.id, P0) : [];
+  const head = '';
+  if (pts.length < 4) return `<div class="vbox">${head}<div class="lnone">${pts.length ? `已采 ${pts.length} 个点，攒够 4 个画线` : '还没有采样'}</div></div>`;
+  const el = Math.max(1, (Date.now() - T0) / 3600e3);
+  const maxH = Math.max(el, 24), maxV = Math.max(1, ...pts.map(q => q.v), ...pv.map(q => q.v));
+  const X = (h) => Math.min(100, h / maxH * 100), Y = (v) => 100 - (v / maxV) * 96 - 2;
+  const path = (a) => a.map((q, i) => `${i ? 'L' : 'M'}${X(q.h).toFixed(2)} ${Y(q.v).toFixed(2)}`).join(' ');
+  return `<div class="vbox">${head}<svg class="ln" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${path(pts)}" fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>${pv.length ? `<path d="${path(pv)}" fill="none" stroke="var(--t3)" stroke-width="1.2" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>` : ''}</svg><div class="blabs"><span>起始<b>${kfmt(pts[0].v)}</b></span><span>${Math.round(maxH)}h<b>${kfmt(maxV)}</b></span><span>当前<b>${kfmt(pts[pts.length - 1].v)}</b></span></div></div>`;
+}
+const visHTML = (cur, prev) => `<div class="vis">${compHTML(cur)}<div class="vt2">${barsHTML(cur)}${lineHTML(cur, prev)}</div></div>`;
+function cmpHTML(cur, prev) {
+  if (!prev) return '';
+  const T0 = epAt(cur), P0 = epAt(prev);
+  const el = Number.isFinite(T0) ? (Date.now() - T0) / 3600e3 : null;
+  let base = prev.views, lab = '上期目前';
+  if (el != null && Number.isFinite(P0)) {
+    const pv = cumPts(prev.id, P0); let same = null;
+    for (const q of pv) if (q.h <= el) same = q.v;
+    if (same != null) { base = same; lab = '上期同时段'; }
+  }
+  // 同龄口径：上期同一 T+N 的累计值做基准
+  return `<div class="cmp" title="${esc(prev.name)} · ${lab} ${fmt(base)} 播放">${lab} <b style="color:var(--t1)">${fmt(base)}</b>${cur.views > 1 ? ` · 本期 <b style="color:var(--t1)">${pct(cur.views, base)}</b>` : ' · 本期发出后在这里对比'}</div>`;
+}
+
 // —— 粉丝 ——
 const latest = (p) => { const d = Object.keys(F[p] || {}).sort(); return d.length ? F[p][d[d.length - 1]] : null; };
 const gainN = (p, n) => { const t = dayStr(new Date()), b = dayStr(new Date(Date.now() - n * 864e5)); return F[p] && F[p][t] != null && F[p][b] != null ? F[p][t] - F[p][b] : null; };
@@ -50,25 +161,38 @@ function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(Math.max(v, 1
 // 每日净增：按平台堆叠的柱，发布日打标记
 function drawFans(el, days, marks) {
   const w = el.clientWidth, h = el.clientHeight; if (w < 60 || h < 60) return;
-  const L = 40, R = 6, T = 20, B = 20, n = days.length, pw = w - L - R, ph = h - T - B, band = pw / n, bw = Math.min(22, Math.max(3, band - 4));
+  const L = 40, R = 56, T = 22, B = 20, n = days.length, pw = w - L - R, ph = h - T - B, band = pw / Math.max(n - 1, 1);
+  // 每个平台取「最近一次记录值」逐步向前补齐；完全没记录的平台不画
+  const series = FANP.map(p => { const arr = []; let last = null; for (const d of days) { const v = F[p] && F[p][d]; if (v != null) last = v; arr.push(last); } return { p, arr }; }).filter(s => s.arr.some(v => v != null));
+  if (!series.length) { el.innerHTML = '<div class="empty" style="position:absolute;inset:0">还没有粉丝记录</div>'; return; }
+  const tot = days.map((_, i) => series.reduce((s, x) => s + (x.arr[i] || 0), 0));
+  const top = niceMax(Math.max(...tot, 1));
+  const X = (i) => L + (n < 2 ? pw / 2 : i * band);
+  const Y = (v) => T + ph - v / top * ph;
+  let s = `<svg width="${w}" height="${h}"><defs>${series.map(x => `<linearGradient id="fg-${x.p}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--p-${x.p})" stop-opacity=".78"/><stop offset="1" stop-color="var(--p-${x.p})" stop-opacity=".3"/></linearGradient>`).join('')}</defs>`;
+  for (const t of [0, top / 2, top]) s += `<line x1="${L}" x2="${w - R}" y1="${Y(t)}" y2="${Y(t)}" stroke="rgba(0,0,0,.07)"/><text x="${L - 6}" y="${Y(t) + 4}" text-anchor="end" font-size="11" fill="var(--t3)">${fmt(t)}</text>`;
+  // 堆叠面积：从下往上按平台叠，总面积 = 粉丝总量
+  const acc = days.map(() => 0), pts = series.map(() => []);
+  series.forEach((x, si) => days.forEach((d, i) => { const base = acc[i]; acc[i] += x.arr[i] || 0; pts[si].push([X(i), Y(acc[i]), Y(base)]); }));
+  series.forEach((x, si) => { const tp = pts[si], bp = [...tp].reverse();
+    s += `<path d="M${tp.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' L')} L${bp.map(p => `${p[0].toFixed(1)},${p[2].toFixed(1)}`).join(' L')} Z" fill="url(#fg-${x.p})"/>`; });
+  // 总量走势线 + 最新值标签
+  s += `<polyline points="${tot.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ')}" fill="none" stroke="var(--t1)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" opacity=".55"/>`;
+  s += `<circle cx="${X(n - 1).toFixed(1)}" cy="${Y(tot[n - 1]).toFixed(1)}" r="4" fill="var(--accent)" stroke="#fff" stroke-width="1.5"/><text x="${(X(n - 1) + 8).toFixed(1)}" y="${(Y(tot[n - 1]) + 4).toFixed(1)}" font-size="13" font-weight="700" fill="var(--t1)">${fmt(tot[n - 1])}</text>`;
   drawFans.lastLab = -1e9;
-  const rows = days.map(d => ({ d, segs: FANP.map(p => ({ p, v: Math.max(0, netOn(p, d) || 0) })).filter(x => x.v > 0) }));
-  rows.forEach(r => r.tot = r.segs.reduce((s, x) => s + x.v, 0));
-  const top = niceMax(Math.max(...rows.map(r => r.tot), 1)), Y = (v) => T + ph - v / top * ph;
-  let s = `<svg width="${w}" height="${h}"><defs>${FANP.map(p => `<linearGradient id="fg-${p}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--p-${p})"/><stop offset="1" stop-color="var(--p-${p})" stop-opacity=".55"/></linearGradient>`).join('')}</defs>`;
-  for (const t of [0, top / 2, top]) s += `<line x1="${L}" x2="${w - R}" y1="${Y(t)}" y2="${Y(t)}" stroke="rgba(0,0,0,.07)"/><text x="${L - 6}" y="${Y(t) + 4}" text-anchor="end">${t ? '+' : ''}${fmt(t)}</text>`;
-  rows.forEach((r, i) => {
-    const x = L + i * band + (band - bw) / 2; let acc = 0;
-    r.segs.forEach((g, j) => { const y1 = Y(acc), y2 = Y(acc + g.v), hh = Math.max(1.5, y1 - y2 - (j < r.segs.length - 1 ? 2 : 0)); acc += g.v;
-      s += `<rect class="bar" style="animation-delay:${i * 16}ms" x="${x.toFixed(1)}" y="${(y1 - (y1 - y2)).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" rx="${j === r.segs.length - 1 ? Math.min(4, bw / 2) : 1.5}" fill="url(#fg-${g.p})"/>`; });
-    let mk = marks[r.d]; const nx = rows[i + 1] && marks[rows[i + 1].d], pv = rows[i - 1] && marks[rows[i - 1].d];
-    let lab = !mk || nx ? '' : pv ? pv + ' / ' + mk : mk;
-    // 发布日一多标签会叠在一起：离上一个标签不到 130px 就只画虚线不写字（悬停仍能看到）
-    const cx = x + bw / 2; if (lab && cx - (drawFans.lastLab ?? -1e9) < 130) lab = ''; else if (lab) { drawFans.lastLab = cx; if (lab.length > 14) lab = lab.slice(0, 13) + '…'; }
-    if (mk) s += `<line x1="${(x + bw / 2).toFixed(1)}" x2="${(x + bw / 2).toFixed(1)}" y1="${T - 6}" y2="${T + ph}" stroke="#0071e3" stroke-opacity=".45" stroke-dasharray="3 3"/><text x="${(x + bw / 2).toFixed(1)}" y="${T - 9}" text-anchor="${i > n - 3 ? 'end' : 'middle'}" style="fill:var(--accent);font-weight:600">${esc(lab)}</text>`;
-    if ((i % 5 === 0 && n - 1 - i > 4) || i === n - 1) s += `<text x="${(x + bw / 2).toFixed(1)}" y="${h - 5}" text-anchor="${i === n - 1 ? 'end' : 'middle'}">${r.d.slice(5)}</text>`;
-    s += `<rect x="${(L + i * band).toFixed(1)}" y="${T}" width="${band.toFixed(1)}" height="${ph}" fill="transparent" data-tip="${r.d.slice(5)}${mk ? '  ' + esc(mk) + ' 发布' : ''}\n${r.segs.length ? r.segs.map(g => PN[g.p] + '  +' + fmt(g.v)).join('\n') + '\n合计  +' + fmt(r.tot) : '没有记录'}"/>`;
+  days.forEach((d, i) => {
+    const mk = marks[d], x = X(i);
+    if (mk) { const nx = days[i + 1] && marks[days[i + 1]], pv = days[i - 1] && marks[days[i - 1]]; let lab = nx ? '' : pv ? pv + ' / ' + mk : mk;
+      // 发布日一多标签会叠在一起：离上一个标签不到 130px 就只画虚线不写字（悬停仍能看到）
+      if (lab && x - (drawFans.lastLab ?? -1e9) < 130) lab = ''; else if (lab) { drawFans.lastLab = x; if (lab.length > 14) lab = lab.slice(0, 13) + '…'; }
+      s += `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${T - 6}" y2="${T + ph}" stroke="var(--accent)" stroke-opacity=".45" stroke-dasharray="3 3"/>`;
+      if (lab) s += `<text x="${x.toFixed(1)}" y="${T - 9}" text-anchor="${i > n - 3 ? 'end' : 'middle'}" font-size="11" font-weight="600" fill="var(--accent)">${esc(lab)}</text>`; }
+    const net = i ? tot[i] - tot[i - 1] : 0;
+    if (net) s += `<circle cx="${x.toFixed(1)}" cy="${Y(tot[i]).toFixed(1)}" r="3.2" fill="${net > 0 ? 'var(--good)' : 'var(--crit)'}" stroke="#fff" stroke-width="1.2"/>`;
+    const tip = `${d.slice(5)}${mk ? '  ' + esc(mk) + ' 发布' : ''}\n` + series.map(x2 => { const v = x2.arr[i] || 0, dd = v - (i ? (x2.arr[i - 1] || 0) : v); return `${PN[x2.p]} ${fmt(v)}${dd ? '（' + sgn(dd) + '）' : ''}`; }).join('\n') + `\n合计 ${fmt(tot[i])}`;
+    s += `<rect x="${(x - band / 2).toFixed(1)}" y="${T}" width="${band.toFixed(1)}" height="${ph}" fill="transparent" data-tip="${tip}"/>`;
   });
+  days.forEach((d, i) => { if ((i % 5 === 0 && n - 1 - i > 4) || i === n - 1) s += `<text x="${X(i).toFixed(1)}" y="${h - 5}" text-anchor="${i === n - 1 ? 'end' : 'middle'}" font-size="11" fill="var(--t3)">${d.slice(5)}</text>`; });
   el.innerHTML = s + '</svg>';
 }
 function sparkLine(p) {
@@ -113,32 +237,56 @@ function insights(cur, ref) {
 }
 
 function heroHTML(cur, prev) {
-  const now = Date.now(), at = cur.schedule ? Date.parse(cur.schedule) : null;
+  const now = Date.now(), at = epAt(cur);
   const pubN = cur.tasks.filter(t => t.state === 'published').length, sch = cur.tasks.filter(t => t.state === 'scheduled').length, todo = cur.tasks.filter(t => ['awaiting_user', 'filled'].includes(t.state)).length, bad = cur.tasks.filter(t => ['failed', 'not_logged_in'].includes(t.state)).length;
   const plan = cur.tasks.filter(t => t.state === 'planned').length;
   const st = bad ? `${bad} 个平台异常` : todo ? `${todo} 个平台等你点发布` : plan === cur.tasks.filter(t => t.state !== 'skipped').length ? `${plan} 个平台，还没开跑` : plan ? `${plan} 个平台还没开跑` : sch ? `${pubN} 已发布 · ${sch} 定时` : '全部已发布';
   const eb = plan && !pubN && !sch ? '分发计划' : bad || todo ? '发布中' : at && at > now ? '即将发布' : at && now - at < 48 * 3600e3 ? '刚发布' : '最新发布';
-  const cmp = prev ? `<div class="cmp">上一期「${esc(prev.nick)}」目前 <b style="color:var(--t1)">${fmt(prev.views)}</b> 播放${cur.views > 1 ? `，这一期是它的 ${pct(cur.views, prev.views)}` : '，这一期发出后在这里对比'}<div class="tr"><i style="width:${Math.min(100, cur.views / Math.max(prev.views, 1) * 100).toFixed(1)}%"></i></div></div>` : '';
   const [t1, t2] = cur.name.split(/[｜|]/).map(x => x.trim()), k = cur.covers.includes('3x4') ? '3x4' : cur.covers[0], src = `/cover?id=${encodeURIComponent(cur.id)}&k=${k}`;
-  const tabs = SL.length > 1 ? `<div class="ctabs">${SL.map((e, i) => { const d = e.schedule ? new Date(e.schedule) : null, dd = d ? Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5) : null;
+  const tabs = SL.length > 1 ? `<div class="ctabs">${SL.map((e, i) => { const aT = epAt(e), d = Number.isFinite(aT) ? new Date(aT) : null, dd = d ? Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5) : null;
       const day = dd == null ? '' : dd === 0 ? '今天' : dd === 1 ? '明天' : dd === -1 ? '昨天' : `${d.getMonth() + 1}/${d.getDate()}`, done = e.tasks.every(t => t.state === 'published' || t.state === 'skipped'), warn = e.tasks.some(t => ['failed', 'not_logged_in', 'awaiting_user', 'filled'].includes(t.state));
       return `<button class="ct${i === HI ? ' on' : ''}" data-i="${i}" title="${esc(e.nick)}：${esc(e.name)}"><i class="${done ? 'ok' : warn ? 'warn' : 'wait'}"></i>${day} ${d ? pad(d.getHours()) + ':' + pad(d.getMinutes()) : esc(e.nick)}${i === HI ? '<u></u>' : ''}</button>`; }).join('')}</div>` : '';
   return `${cur.covers.length ? `<div class="amb" style="background-image:url('${src}')"></div><div class="stage"><div class="float"><a class="cv" href="/p#/ep/${encodeURIComponent(cur.id)}"><i class="edge"></i><img src="${src}" alt=""><i class="glare"></i><span class="tagz a">第 ${esc(cur.episode)} 期</span><span class="tagz b"><i></i>${pubN}/${cur.tasks.length} 平台已发布</span></a></div></div>` : ''}
-      <div class="inf">${tabs}<div class="eyebrow">${eb}</div><h2>${esc(t1)}</h2>${t2 ? `<div class="subt">${esc(t2)}</div>` : ''}<div class="when"><span id="cd"></span><span style="color:var(--t3)">· ${esc(st)}</span></div>
+      <div class="inf">${tabs}<div class="eyebrow">${eb}</div><h2><span class="ht">${esc(t1)}</span></h2>${t2 ? `<div class="subt">${esc(t2)}</div>` : ''}<div class="when"><span id="cd"></span><span class="stx">${esc(st)}</span></div>
         <div class="plats">${PL.map(p => task(cur, p)).filter(Boolean).map(t => { const u = safeUrl(t.url), on = t.state === 'published', cls = on ? 'on' : ['awaiting_user', 'filled'].includes(t.state) ? 'todo' : ['failed', 'not_logged_in'].includes(t.state) ? 'bad' : ''; return `<${u ? `a href="${u}" target="_blank" rel="noopener"` : 'div'} class="pl ${cls}" data-tip="${PN[t.platform]}  ${esc(t.stateCn)}${t.detail ? '\n' + esc(t.detail) : ''}">${logo(t.platform)}<div><b>${PN[t.platform]}</b><span>${on ? (t.m ? (SL.length > 1 ? kfmt(t.m.views) : fmt(t.m.views) + ' 播放') : '已发布') : esc(t.stateCn)}</span></div></${u ? 'a' : 'div'}>`; }).join('')}</div>
-        <div class="nums"><div><div class="lab">全平台播放</div><div class="val">${cur.views > 1 ? fmt(cur.views) : '–'}</div></div><div><div class="lab">互动（赞评藏转）</div><div class="val">${cur.views > 1 ? fmt(cur.inter) : '–'}</div></div><div><div class="lab">互动率</div><div class="val">${cur.views > 1 ? pct(cur.inter, cur.views, 1) : '–'}</div></div></div>${cmp}</div>`;
+        ${numsHTML(cur)}${visHTML(cur, prev)}${cmpHTML(cur, prev)}</div>`;
 }
 let SL = [], HI = null, HID = null, HT = null;
 // 切到第 i 张：只换大卡，不动其他面板
 function show(i, user) {
   if (!SL.length) return; HI = (i + SL.length) % SL.length; HID = SL[HI].id;
   const el = $('#hero'); if (!el) return;
-  el.classList.add('fade'); setTimeout(() => { el.innerHTML = heroHTML(SL[HI], PREVOF ? PREVOF(SL[HI]) : null); el.classList.remove('fade'); tick(); fixTabs(); }, 180);
+  el.classList.add('fade'); setTimeout(() => { el.innerHTML = heroHTML(SL[HI], PREVOF ? PREVOF(SL[HI]) : null); el.classList.remove('fade'); tick(); fixTabs(); const busy = fitH(); const durS = parseFloat(getComputedStyle(document.querySelector('.hero h2') || el).getPropertyValue('--dur')) || 12; PAUSE = Date.now() + (user ? 30000 : busy ? Math.max(9000, durS * 1000 + 1500) : 9000); }, 180);
   if (user) PAUSE = Date.now() + 30000;
 }
 let PAUSE = 0, PREVOF = null;
 const fixTabs = () => { const c = document.querySelector('.ctabs'), o = c && c.querySelector('.ct.on'); if (o) c.scrollLeft = Math.max(0, o.offsetLeft - c.offsetLeft - 40); };
-setInterval(() => { if (SL.length > 1 && Date.now() > PAUSE && !document.hidden && !($('#hero') && $('#hero').matches(':hover'))) show(HI + 1); }, 9000);
+// 单行 + 放不下就自动来回滚动（LED 屏式）：标题与粉丝面板底部说明共用
+function mqOne(h) {
+  if (!h) return false;
+  const sp = h.querySelector('.ht') || h;
+  h.classList.remove('scroll');
+  h.style.removeProperty('--dx');
+  sp.style.transform = '';
+  const avail = h.clientWidth || (h.parentElement ? h.parentElement.clientWidth : 0);
+  const w = sp.getBoundingClientRect().width;
+  if (!avail || w <= avail + 1) return false;
+  const dx = Math.ceil(w - avail + 12);
+  h.style.setProperty('--dx', '-' + dx + 'px');
+  h.style.setProperty('--dur', Math.max(8, Math.min(22, Math.round(dx / 6) + 8)) + 's');
+  h.classList.add('scroll');
+  return true;
+}
+function fitH() {
+  const h2 = document.querySelector('.hero h2');
+  const mq = [];
+  if (h2) mq.push(h2);
+  document.querySelectorAll('.fans .cap').forEach(c => mq.push(c));
+  let busy = false;
+  for (const el of mq) if (mqOne(el)) busy = true;
+  return busy;
+}
+setInterval(() => { if (SL.length > 1 && Date.now() > PAUSE && !document.hidden && !($('#hero') && $('#hero').matches(':hover'))) show(HI + 1); }, 1500);
 document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('.ct'); if (b) { e.preventDefault(); show(+b.dataset.i, true); } });
 
 function loginLight(h) {
@@ -156,7 +304,7 @@ function render() {
   if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; }
   F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total;
   // 大卡轮播：没全部发完的期 + 48 小时内刚发的期，按发布时间排；默认停在「最近刚发的」，没有就停在「最快要发的」
-  const at = (e) => e.schedule ? Date.parse(e.schedule) : Date.parse(e.createdAt);
+  const at = epAt;
   const open = (e) => e.tasks.some(t => t.state !== 'published' && t.state !== 'skipped');
   SL = eps.filter(e => open(e) || (at(e) <= now && now - at(e) < 48 * 3600e3)).sort((a, b) => at(a) - at(b));
   if (!SL.length && eps[0]) SL = [eps[0]];
@@ -170,6 +318,10 @@ function render() {
   const g1 = FANP.map(p => gainN(p, 1)).filter(v => v != null), g7 = FANP.map(p => gainN(p, 7)).filter(v => v != null), g30 = FANP.map(p => gainN(p, 30)).filter(v => v != null);
   const cover7 = FANP.filter(p => gainN(p, 7) != null), noHist = FANP.filter(p => gainN(p, 1) == null);
   const marks = Object.fromEntries(eps.filter(e => e.schedule).map(e => [e.schedule.slice(0, 10), e.nick]));
+  const fanRows = FANP.map(p => ({ p, raw: latest(p) })).sort((a, b) => (b.raw ?? -1) - (a.raw ?? -1));
+  const fSum = fanRows.reduce((s, x) => s + (x.raw || 0), 0);
+  const compSegs = fanRows.filter(x => x.raw > 0).map(x => `<i style="flex:${x.raw} 1 0;background:var(--p-${x.p})" data-tip="${PN[x.p]} ${fmt(x.raw)} · 占 ${fSum ? (x.raw / fSum * 100).toFixed(1) : 0}%"></i>`).join('');
+  const compLegend = fanRows.map(x => `<span class="cl${x.raw != null ? '' : ' zero'}"><i class="dot" style="background:var(--p-${x.p})"></i>${PN[x.p]}<b>${x.raw == null ? '–' : fmt(x.raw)}</b><small>${x.raw == null ? '无记录' : fSum ? (x.raw / fSum * 100).toFixed(1) + '%' : '0.0%'}</small></span>`).join('');
   const l7 = days.slice(-7);
   let hero = '<div class="empty">还没有登记的期数</div>';
   if (cur) hero = heroHTML(cur, prevOf(cur));
@@ -183,7 +335,7 @@ function render() {
   };
   const f0 = O.feed[0];
   $('#screen').innerHTML = `
-  <div class="top"><div class="logo">麦<i>田</i></div><div class="tag">内容与粉丝监控</div>
+  <div class="top"><div class="logo">麦田</div><div class="tag">内容与粉丝监控</div>
     <div class="nav"><a class="on" href="/">大屏</a><a href="/p#/traffic">流量</a><a href="/p#/calendar">日历</a><a href="/p#/convert">转化</a><a href="/p#/archive">档案</a><a href="/p#/system">系统</a></div>
     <div class="lights"><span class="light ok">守护进程 运行中</span><span class="light ${h.nas ? 'ok' : 'bad'}">NAS ${h.nas ? '已挂载' : '读不到'}</span><span class="light ${h.chrome ? 'ok' : 'bad'}">专用浏览器 ${h.chrome ? '在线' : '没开'}</span>
       <span class="light ${lc}">${lt}</span></div>
@@ -193,9 +345,10 @@ function render() {
     <div class="panel hero" id="hero">${hero}</div>
     <div class="panel fans"><div class="ph"><h3>粉丝</h3><span class="note">${FANP.length} 个平台合计，不含知识站</span></div>
       <div class="headline"><div class="val xl">${fmt(fansTotal)}</div><div class="g">${gp('今日', g1.length ? g1.reduce((a, b) => a + b, 0) : null)}${gp('近 7 天', g7.length ? g7.reduce((a, b) => a + b, 0) : null)}${gp('近 30 天', g30.length ? g30.reduce((a, b) => a + b, 0) : null)}</div></div>
-      <div class="ph" style="margin:10px 0 2px"><h3 style="font-size:12.5px;color:var(--t2);font-weight:500">每日净增 · 近 30 天</h3><span class="note">${FANP.filter(p => gainN(p, 2) != null).map(p => `<i class="sw" style="width:8px;height:8px;margin:0 5px 0 10px;background:var(--p-${p})"></i>${PN[p]}`).join('')}</span></div>
+      <div class="fans-comp"><div class="comp-bar">${compSegs || '<i></i>'}</div><div class="comp-legend">${compLegend}</div></div>
+      <div class="ph" style="margin:8px 0 2px;flex-wrap:wrap;row-gap:2px"><h3 style="font-size:12px;color:var(--t2);font-weight:500;white-space:nowrap;flex:1 1 100%">粉丝走势 · 近 30 天（各平台堆叠）</h3><span class="note" style="flex:1 1 100%;text-align:left;font-size:9.5px;white-space:nowrap;overflow:hidden">${FANP.filter(p => gainN(p, 2) != null).map(p => `<i class="sw" style="width:7px;height:7px;margin:0 4px 0 8px;background:var(--p-${p})"></i>${PN[p]}`).join('')}</span></div>
       <div class="pb chart" id="c-fans"></div>
-      <div class="cap">${noHist.length ? `${noHist.map(p => PN[p]).join('、')}后台不给历史，从今天开始记；涨跌只统计${cover7.map(p => PN[p]).join('、') || '有历史的平台'}` : '全部平台都有记录'}</div></div>
+      <div class="cap"><span class="ht">${noHist.length ? `${noHist.map(p => PN[p]).join('、')}后台不给历史，从今天开始记；涨跌只统计${cover7.map(p => PN[p]).join('、') || '有历史的平台'}` : '全部平台都有记录'}</span></div></div>
     <div class="panel"><div class="ph"><h3>数据分析</h3><span class="note">按规则自动算，每天更新</span></div><div class="pb ins">${insights(cur, ref)}</div></div>
   </div>
 
@@ -203,7 +356,7 @@ function render() {
 
   ${O.siteOn ? `  <a class="panel strip" href="/p#/convert"><h3>${esc(PN.zsz)} · 近 7 天</h3><span>新注册<b>${fmt(sum(l7, 'reg'))}</b></span><span>新会员<b>${fmt(sum(l7, 'vip'))}</b></span><span>订单<b>${fmt(sum(l7, 'orders'))}</b></span><span>收入<b>¥${fmt(sum(l7, 'revenue'))}</b></span>
     <span class="feedline">${f0 ? `最近动态：${pad(new Date(f0.ts).getHours())}:${pad(new Date(f0.ts).getMinutes())} ${f0.nick ? '「' + esc(f0.nick) + '」' : ''}${esc(f0.platform)} ${esc(f0.action)}${f0.result ? ' · ' + esc(f0.result) : ''}` : ''}</span><span class="go">转化详情 ›</span></a>` : ''}`;
-  draw(); tick(); fixTabs(); if (!render.done) { render.done = true; countUp(); }
+  draw(); tick(); fixTabs(); const h0 = document.querySelector('.hero h2'), busy0 = fitH(); const dur0 = (h0 && parseFloat(getComputedStyle(h0).getPropertyValue('--dur'))) || 12; PAUSE = Date.now() + (busy0 ? Math.max(9000, dur0 * 1000 + 1500) : 9000); if (!render.done) { render.done = true; countUp(); }
 }
 function draw() { if (!O) return; const ins = document.querySelector('.ins'); if (ins && innerWidth > 1100) { [...ins.children].forEach(c => c.style.display = ''); for (let k = ins.children.length - 1; k > 0 && ins.scrollHeight > ins.clientHeight + 2; k--) ins.children[k].style.display = 'none'; } const el = $('#c-fans'); if (!el) return; drawFans(el, daysBack(30), Object.fromEntries(O.episodes.filter(e => e.schedule).map(e => [e.schedule.slice(0, 10), e.nick]))); }
 function countUp() {
@@ -229,7 +382,7 @@ async function load() {
 }
 const tip = $('#tip');
 document.addEventListener('mousemove', (e) => { const t = e.target.closest && e.target.closest('[data-tip]'); if (!t) { tip.style.display = 'none'; return; } tip.textContent = t.dataset.tip; tip.style.display = 'block'; const w = tip.offsetWidth; tip.style.left = Math.min(innerWidth - w - 8, e.clientX + 14) + 'px'; tip.style.top = Math.max(8, e.clientY - 34) + 'px'; });
-addEventListener('resize', draw);
+addEventListener('resize', () => { draw(); fitH(); });
 if (matchMedia('(hover:hover)').matches) {
   let last = null;
   document.addEventListener('mousemove', (e) => {
