@@ -58,6 +58,12 @@ describe('MCP read 组', () => {
     assert.equal(t.root.id, 'Douyin:r1');
     assert.equal(t.root.children[0].children[0].author.isMe, true);
     assert.equal(t.work.title, '作品一');
+    const c = (await call(conn.client, 'get_comment_thread', { commentId: 'Douyin:me', compact: true, around: 'Douyin:me', n: 1 })).value;
+    assert.deepEqual(c.items.map((x) => [x.id, x.depth, x.isMe]), [['Douyin:r1', 0, false], ['Douyin:a', 1, false], ['Douyin:me', 2, true]]);
+    assert.equal(c.total, 3);
+    assert.equal(c.omitted, 0);
+    assert.deepEqual(Object.keys((await call(conn.client, 'list_comments', { compact: true })).value.items[0]), ['id', 'author', 'isMe', 'replyTo', 'text', 'at', 'depth']);
+    assert.equal((await call(conn.client, 'list_events', { unhandled: true, compact: true })).value.items[0].subjectId, 'Douyin:a');
     const ack = (await call(conn.client, 'ack_event', { eventId: 'comment.created:Douyin:a', outcome: 'replied' })).value;
     assert.equal(ack.handled.outcome, 'replied');
     const sub = (await call(conn.client, 'subscribe_events', { subscriberId: 'b1', url: 'https://bot.example/h', types: ['comment.created'] })).value;
