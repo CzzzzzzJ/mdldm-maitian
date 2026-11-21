@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS site_channels (source TEXT PRIMARY KEY, label TEXT, r
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, episode_id TEXT, platform TEXT, action TEXT, result TEXT);
 `);
+// 老库补列：每家平台的真实发布时间与当时标题（per-platform 标记）
+const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
+for (const name of ['published_at', 'published_title']) {
+  if (!taskColumns.has(name)) db.exec(`ALTER TABLE tasks ADD COLUMN ${name} TEXT`);
+}
 const now = () => new Date().toISOString();
 export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', zsz: '知识站' };
 // 已经到位、不允许再跑的状态（防重）
@@ -38,9 +43,9 @@ export const getEpisode = (id) => db.prepare('SELECT * FROM episodes WHERE id=?'
 // 返回 true 表示状态真的变了
 export function setTask(eid, p, state, detail = '', extra = {}) {
   const old = getTask(eid, p);
-  db.prepare(`INSERT INTO tasks (episode_id, platform, state, detail, url, tab_id, updated_at) VALUES (?,?,?,?,?,?,?)
-    ON CONFLICT(episode_id, platform) DO UPDATE SET state=excluded.state, detail=excluded.detail, url=COALESCE(excluded.url, tasks.url), tab_id=COALESCE(excluded.tab_id, tasks.tab_id), updated_at=excluded.updated_at`)
-    .run(eid, p, state, detail, extra.url ?? null, extra.tabId ?? null, now());
+  db.prepare(`INSERT INTO tasks (episode_id, platform, state, detail, url, tab_id, updated_at, published_at, published_title) VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(episode_id, platform) DO UPDATE SET state=excluded.state, detail=excluded.detail, url=COALESCE(excluded.url, tasks.url), tab_id=COALESCE(excluded.tab_id, tasks.tab_id), updated_at=excluded.updated_at, published_at=COALESCE(excluded.published_at, tasks.published_at), published_title=COALESCE(excluded.published_title, tasks.published_title)`)
+    .run(eid, p, state, detail, extra.url ?? null, extra.tabId ?? null, now(), extra.publishedAt ?? null, extra.publishedTitle ?? null);
   return !old || old.state !== state || old.detail !== detail;
 }
 export function log(eid, p, action, result = '') {

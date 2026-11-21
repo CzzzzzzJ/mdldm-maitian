@@ -38,6 +38,24 @@ const ZSZ_LEAD = 30;   // 知识站建课提前量（分钟）：上传 + 转码
 const strip = (s) => String(s || '').replace(/ *\d+%/, '');
 const mapState = (s) => s === '待你发布' || s === '已填写' ? 'filled' : s === '异常' || s === '上传超时' ? 'failed' : s === '未登录' ? 'not_logged_in' : s === '已停止' ? 'stopped' : s === '跳过' ? 'skipped' : 'running';
 const loadProject = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8'));
+// 平台回传的发布时间：数字是毫秒/秒时间戳，字符串是「2026-11-19 09:00」或「2026年11月19日 09:00」
+function bjTime(v) {
+  if (v === null || v === undefined || v === '') return '';
+  const s0 = String(v);
+  if (/^(\d{10}|\d{13})$/.test(s0)) {
+    const ms = s0.length === 13 ? Number(s0) : Number(s0) * 1000;
+    return new Date(ms + 8 * 3600e3).toISOString().slice(0, 19).replace('T', ' ');
+  }
+  if (/T/.test(s0) && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(s0)) {
+    const ms = Date.parse(s0);
+    return Number.isFinite(ms) ? new Date(ms + 8 * 3600e3).toISOString().slice(0, 19).replace('T', ' ') : '';
+  }
+  const m = s0.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})\D+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return '';
+  const p2 = (x) => String(x).padStart(2, '0');
+  return `${m[1]}-${p2(m[2])}-${p2(m[3])} ${p2(m[4])}:${m[5]}:${m[6] || '00'}`;
+}
+// 每家平台各自记一份真实发布时间，取链接时顺手写回工程与快照
 const projectOf = (ep, pj) => ({ dir: path.relative(config.rootPath, ep.dir), data: pj });
 // 停用的平台：config.disabled（系统页里开关）。从登录、体检、保活、发布、采粉丝里都去掉
 // 每次现读 config.disabled：网页「系统 → 平台」改的是同一个 config 对象，守护进程不用重启就生效
@@ -221,10 +239,17 @@ async function sync(ep, ids, quiet = false) {
   ids = (ids || Object.keys(pj.platforms)).filter(i => pj.platforms[i] && !pj.platforms[i].skip);
   const before = table(ep.id);
   const r = await drv.links(projectOf(ep, pj), ids);
+  let touchedPlat = false;
   for (const [id, v] of Object.entries(r)) {
     const state = /定时|审核|转码/.test(v.status || '') ? 'scheduled' : v.url || /已发布|已上线/.test(v.status || '') ? 'published' : null;
+    const bjt = bjTime(v.time);
+    if (bjt && pj.platforms[id] && /已发布|已上线|定时|审核/.test(v.status || '')) {
+      pj.platforms[id].published_at = bjt;
+      pj.platforms[id].published_title = pj.platforms[id].published_title || pj.platforms[id].title || pj.platforms[id].shortTitle || '';
+      touchedPlat = true;
+    }
     log(ep.id, id, 'links', JSON.stringify(v));
-    if (state) setTask(ep.id, id, state, [v.status, v.note].filter(Boolean).join('，'), { url: v.url || undefined });
+    if (state) setTask(ep.id, id, state, [v.status, v.note].filter(Boolean).join('，'), { url: v.url || undefined, publishedAt: bjt || undefined, publishedTitle: pj.platforms[id] && pj.platforms[id].published_title });
     // 平台实际记录的定时和计划不一致就报警（视频号第 36 期 15:00、第 37 期 22:00、第 4 期 20:00 都被改过）
     if (state === 'scheduled' && pj.schedule && v.time) {
       let t = typeof v.time === 'number' ? v.time : NaN;
@@ -234,6 +259,10 @@ async function sync(ep, ids, quiet = false) {
         await notify(`⚠️ ${ep.name}\n${NAMES[id]}平台上记录的定时是 ${new Date(t + 8 * 3600e3).toISOString().slice(0, 16).replace('T', ' ')}，计划是 ${pj.schedule.slice(0, 16).replace('T', ' ')}，请去作品管理改`);
       }
     }
+  }
+  if (touchedPlat) {
+    try { fs.writeFileSync(path.join(ep.dir, 'publish.json'), JSON.stringify(pj, null, 2) + '\n'); } catch (e) { console.error('发布时间没写回工程：' + e.message); }
+    saveSnapshot(ep.id, pj, true);
   }
   const tasks = getTasks(ep.id);
   try { fs.writeFileSync(path.join(ep.dir, '发布记录.json'), JSON.stringify({ updatedAt: new Date().toISOString(), platforms: Object.fromEntries(tasks.map(t => [t.platform, { name: NAMES[t.platform], state: STATE_CN[t.state] || t.state, url: t.url || '', detail: t.detail || '' }])) }, null, 2) + '\n'); } catch (e) { console.error('发布记录没写进 NAS：' + e.message); }

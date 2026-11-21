@@ -31,10 +31,40 @@ function episodeView(ep, full = false) {
     const p = pj.platforms[t.platform] || {};
     return { platform: t.platform, name: NAMES[t.platform] || t.platform, state: t.state, stateCn: STATE_CN[t.state] || t.state, detail: t.detail || '', url: t.url || '', updatedAt: t.updated_at,
       m: m && { day: m.day, views: m.views, likes: m.likes, comments: m.comments, favorites: m.favorites, shares: m.shares, extra: JSON.parse(m.extra || '{}') },
+      publishedAt: t.published_at || p.published_at || '', publishedTitle: t.published_title || p.published_title || '',
       ...(full ? { copy: { title: p.title || p.shortTitle || '', body: p.desc || p.body || p.text || p.description || '', tags: p.tags || p.topics || [], covers: p.covers || [] }, shot: fs.existsSync(path.join(ep.dir, '发布档案', `${t.platform}.jpg`)) } : {}) };
   });
-  const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, createdAt: ep.created_at, dir: ep.dir,
-    campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers: Object.keys(pj.covers || {}), durationSec: pj.durationSec || 0, tasks, views, inter };
+  // 封面缓存版本号：封面文件被替换（同 URL、新内容）时改 v，避免浏览器继续用旧的占位图
+  const covers = Object.keys(pj.covers || {});
+  let coverMtime = 0, coverSize = 0;
+  for (const k of covers) { try { const s = fs.statSync(path.join(ep.dir, pj.covers[k])); coverMtime = Math.max(coverMtime, Math.round(s.mtimeMs)); coverSize += s.size; } catch {} }
+  const coverVer = coverMtime ? Math.round(coverMtime / 1000).toString(36) + '-' + coverSize.toString(36) : '';
+  // 实际发布时间：取各平台 published_at 里最早的一个（北京时间），没有就退回计划时间。
+  // 视频号可能提前单独发布；保留平台原时间，整期优先按主平台定位。
+  // 它的时间照实记在 platforms.channels.published_at 里，但不参与这个锚点，否则整期会回退到前一天。
+  const MAIN_PLAT = ['douyin', 'bilibili', 'xhs', 'youtube', 'x', 'instagram', 'zsz'];
+  const when = (raw) => {
+    if (!raw) return NaN;
+    const s = String(raw);
+    const x = s.replace(' ', 'T');
+    return Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(x) ? x : x + (x.length === 16 ? ':00+08:00' : '+08:00'));
+  };
+  // 扩展平台可能隔天单独发布，不改变已有主平台的日期锚点。
+  // 否则整期会被拖到公众号那天，日历上就看不见四家真正发布的那一天。
+  const ANCHOR_PLAT = new Set([...MAIN_PLAT, 'channels']);
+  let firstPublish = 0, anyPublish = 0;
+  for (const [pid, p] of Object.entries(pj.platforms || {})) {
+    if (p.skip) continue;
+    const t = when((tasks.find(t => t.platform === pid) || {}).publishedAt || p.published_at);
+    if (!Number.isFinite(t)) continue;
+    if (ANCHOR_PLAT.has(pid) && (!anyPublish || t < anyPublish)) anyPublish = t;   // 兜底：只有视频号发过也照样定位
+    if (MAIN_PLAT.includes(pid) && (!firstPublish || t < firstPublish)) firstPublish = t;
+  }
+  const fallback = Object.entries(pj.platforms || {}).filter(([, p]) => !p.skip).map(([, p]) => when(p.published_at)).filter(Number.isFinite);
+  const publishMs = firstPublish || anyPublish || (fallback.length ? Math.min(...fallback) : 0);
+  const publishAt = publishMs ? new Date(publishMs).toISOString() : '';
+  const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, publishAt, createdAt: ep.created_at, dir: ep.dir,
+    campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers, coverVer, durationSec: pj.durationSec || 0, tasks, views, inter };
   if (full) {
     out.logs = recentLogs(ep.id, 200);
     out.metrics = db.prepare('SELECT day, platform, views, likes, comments, favorites, shares FROM metrics WHERE episode_id=? ORDER BY day').all(ep.id);
