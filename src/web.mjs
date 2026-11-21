@@ -18,7 +18,7 @@ const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
-const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram'];   // 知识站不是平台账号，不在这里
+const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 const platformList = () => PLATFORMS.map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
 

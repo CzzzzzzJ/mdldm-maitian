@@ -245,7 +245,7 @@ async function render() {
   if (fsDraft != null) { const wh = $('#fs-webhook'); if (wh) wh.value = fsDraft; }
 }
 async function load() {
-  try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
+  try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); if (!(O.health.platforms || []).some(p => p.id === 'wechat')) off.add('wechat'); PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
   catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
