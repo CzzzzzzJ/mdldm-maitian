@@ -1,8 +1,9 @@
 <p align="center"><img src="docs/readme/banner.png" alt="麦田 · 给多平台博主的开源工作台" /></p>
 
 <p align="center">
+  <a href="https://maitian.mdldm.club/?utm_source=github&utm_medium=readme&utm_campaign=maitian-readme"><img src="https://img.shields.io/badge/官网-maitian.mdldm.club-7B5CFF" alt="官网" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2ea44f" alt="MIT" /></a>
-  <img src="https://img.shields.io/badge/macOS-only-1c1a16?logo=apple" alt="macOS" />
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-1c1a16?logo=apple" alt="macOS | Windows" />
   <img src="https://img.shields.io/badge/Node.js-%E2%89%A5%2022.5-5FA04E?logo=nodedotjs&logoColor=white" alt="Node 22.5+" />
   <a href="https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj"><img src="https://img.shields.io/badge/Chrome-麦田发布助手-F2B21B?logo=googlechrome&logoColor=white" alt="麦田发布助手" /></a>
   <a href="https://github.com/CzzzzzzJ/mdldm-maitian/stargazers"><img src="https://img.shields.io/github/stars/CzzzzzzJ/mdldm-maitian?style=social" alt="Stars" /></a>
@@ -13,8 +14,13 @@
   <a href="#看它跑一遍">看它跑一遍</a> ·
   <a href="#怎么配合">怎么配合</a> ·
   <a href="#各平台的坑实战总结">各平台的坑</a> ·
+  <a href="SHOWCASE.md">用户案例</a> ·
+  <a href="CONTRIBUTING.md">参与贡献</a> ·
   <a href="#作者">作者</a>
 </p>
+
+> **一句话**：麦田是 Agent 驱动的自媒体发布工作台——你对 AI 说一句「整理发布」，一期视频填好八个平台，数据每天自己回来。
+> **一行装好**：`bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install.sh)"`（Windows 见[下文](#一行装好)）· 用麦田做出了东西？[来晒案例](SHOWCASE.md)
 
 一个人做内容，要发六七个平台，每个平台的文案、封面、发布形式都不一样；发完还想知道哪期起来了、哪个平台涨粉、哪个平台真的带来了付费。麦田就是我自己每天在用的那套工作台：
 
@@ -22,7 +28,7 @@
 2. **看得清楚**：每期在每个平台的播放、互动，各平台粉丝，每天自动采、长期留存；手机上看大屏，飞书群推卡片。
 3. **算得出钱**：接上你自己的站点，看哪一期、哪个平台带来了注册和收入。
 
-> 跑在一台常开的 Mac 上，用你自己登录好的浏览器操作各平台，**不存任何平台密码**。国内五家只填写不发布，最后一下由你自己点。
+> 跑在一台常开的 Mac 或 Windows 电脑上，用你自己登录好的浏览器操作各平台，**不存任何平台密码**。国内五家只填写不发布，最后一下由你自己点。
 
 ## 看它跑一遍
 
@@ -236,9 +242,9 @@ iPhone 桌面 / 锁屏常驻显示全平台粉丝、今日涨粉、最新一期�
 
 ### 交流群
 
-想一起聊麦田、多平台运营的，微信扫码进群（1、2、3、4 群已满，现在开的是 5 群）：
+想一起聊麦田、多平台运营的，微信扫码进群（1–5 群已满，现在开的是 6 群）：
 
-<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 5 群" /></p>
+<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 6 群" /></p>
 
 > 微信群码 7 天有效（这张 11 月 27 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
 

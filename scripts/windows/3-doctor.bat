@@ -10,5 +10,5 @@ if not exist "%ROOT%\mdldm-maitian\src\hub.mjs" (
 if not exist "%ROOT%\mdldm-maitian\data" mkdir "%ROOT%\mdldm-maitian\data"
 cd /d "%ROOT%\mdldm-maitian"
 echo Checking platform login status and upload pages (no upload, no fill).
-node src\hub.mjs doctor
+node src\hub.mjs doctor %*
 pause

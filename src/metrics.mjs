@@ -42,7 +42,10 @@ export const collectors = {
     return { views: get('播放'), likes: get('点赞'), comments: get('评论'), shares: get('分享') };
   },
   async channels({ p }) {
-    const first = p.body.split('\n')[0].trim().slice(0, 30);
+    // publish.json 里视频号写的是 desc（不是 body），取不到 body 时按 desc / 短标题退回，否则会抛 TypeError 一直读不到数
+    const src = String((p && (p.body || p.desc || p.shortTitle || p.title)) || '');
+    const first = src.split('\n')[0].trim().slice(0, 30);
+    if (!first) return null;   // 三个字段都空时别用空串去匹配，否则 startsWith('') 会撞上第一条作品（别人家的数）
     const n = await withTab('https://channels.weixin.qq.com/platform/post/list', (t) => evaluate(t, `(()=>{const R=document.querySelector('wujie-app')&&document.querySelector('wujie-app').shadowRoot;if(!R)return null;const c=[...R.querySelectorAll('.post-feed-item')].find(c=>c.innerText.trim().startsWith(${J(first)}));if(!c)return null;const o={};for(const d of c.querySelectorAll('.data-item')){const k=/eyes/.test(d.innerHTML)?'views':/outlined-like/.test(d.innerHTML)?'likes':/comment/.test(d.innerHTML)?'comments':/icon-share/.test(d.innerHTML)?'shares':/thumb/.test(d.innerHTML)?'recommend':'';if(k)o[k]=d.innerText.trim()}return o})()`), { wait: 14000 });
     return n && { views: num(n.views), likes: num(n.likes), comments: num(n.comments), shares: num(n.shares), extra: { 推荐: num(n.recommend) } };
   },

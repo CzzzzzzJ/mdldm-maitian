@@ -7,7 +7,7 @@ import { config } from './feishu.mjs';
 const PORT = config.chromePort || 9333;
 export const PROFILE = (config.chromeProfile || '~/publish-hub/chrome-profile').replace(/^~/, os.homedir());
 const BIN = process.platform === 'win32'
-  ? (['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', path.join(os.homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe')].find(p => fs.existsSync(p)) || 'chrome.exe')
+  ? ([process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA, 'C:\\Program Files'].filter(Boolean).map(d => path.join(d, 'Google', 'Chrome', 'Application', 'chrome.exe')).find(p => fs.existsSync(p)) || 'chrome.exe')
   : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 

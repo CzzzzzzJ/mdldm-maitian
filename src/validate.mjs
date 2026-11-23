@@ -7,7 +7,7 @@ export async function validateProject(dir) {
   const { validate, PLATFORMS, len } = await import(pathToFileURL(path.join(pluginDir(), 'lib', 'bundle.js')).href);
   const b = JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8'));
   const files = new Set();
-  const walk = (d) => fs.readdirSync(d).forEach(n => { const p = path.join(d, n); fs.statSync(p).isDirectory() ? walk(p) : files.add(path.relative(dir, p)); });
+  const walk = (d) => fs.readdirSync(d).forEach(n => { const p = path.join(d, n); fs.statSync(p).isDirectory() ? walk(p) : files.add(path.relative(dir, p).split(path.sep).join('/')); });
   walk(dir);
   const { errors, warnings } = validate(b, files);
   // moov 必须在文件头，否则小红书报「无视频流信息」、抖音不出表单

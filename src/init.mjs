@@ -29,12 +29,17 @@ const yes = async (q, def = true) => { def = def && !!process.stdin.isTTY; const
 const ok = (t) => console.log(`  ✅ ${t}`), bad = (t) => console.log(`  ❌ ${t}`), tip = (t) => console.log(`  ·  ${t}`);
 const home = (p) => p.replace(/^~(?=\/|$)/, os.homedir());
 
+const WIN = process.platform === 'win32';
 console.log('\n麦田 · 安装向导\n');
 console.log('一、检查环境');
 const [maj, min] = process.versions.node.split('.').map(Number);
 if (maj > 22 || (maj === 22 && min >= 5)) ok(`Node.js ${process.versions.node}`); else { bad(`Node.js ${process.versions.node}，需要 22.5 以上（用到内置 node:sqlite）`); tip(`卡住了看这里：${GROUP_URL}`); process.exit(1); }
-if (process.platform !== 'darwin') tip('目前只在 macOS 上实测过；其他系统需要自己改开机自启和 NAS 挂载部分');
-const chrome = ['/Applications/Google Chrome.app', path.join(os.homedir(), 'Applications/Google Chrome.app')].find(fs.existsSync);
+if (WIN) tip('Windows：开机自启还没适配，装完后双击安装目录里的 4-start.bat 启动麦田（窗口别关）');
+else if (process.platform !== 'darwin') tip('目前只在 macOS 和 Windows 上实测过；其他系统需要自己改开机自启和 NAS 挂载部分');
+// Windows 上 Chrome 可能装在 Program Files、Program Files (x86) 或用户目录（只给自己装时）
+const chrome = (WIN
+  ? [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].filter(Boolean).map(d => path.join(d, 'Google', 'Chrome', 'Application', 'chrome.exe'))
+  : ['/Applications/Google Chrome.app', path.join(os.homedir(), 'Applications/Google Chrome.app')]).find(fs.existsSync);
 chrome ? ok('Google Chrome') : bad('没找到 Google Chrome，请先安装');
 let cf = false; try { execFileSync('which', ['cloudflared'], { stdio: 'pipe' }); cf = true; ok('cloudflared（可选，远程访问用）'); } catch { tip('没装 cloudflared：想在手机上远程看麦田，之后 brew install cloudflared'); }
 
@@ -79,7 +84,7 @@ if (chrome && await yes('现在打开专用 Chrome：先从应用商店添加麦
 console.log(`
 完成。接下来：
   · 打开 http://localhost:${cfg.web.port}/?key=${cfg.web.key}
-  · 登录完各平台后跑一次体检：node src/hub.mjs doctor
+  · 登录完各平台后跑一次体检，只查登录了的平台更快：node src/hub.mjs doctor --only bilibili,xhs${WIN ? '\n  · Windows：双击安装目录里的 4-start.bat 启动麦田（窗口别关），2-login.bat 重新打开专用 Chrome 登录' : ''}
   · 只看数据（L1）：已经发过的期用 node src/hub.mjs adopt <工程目录> 登记
   · 分发（L2）：按 skills/maitian-publish 准备发布工程，node src/hub.mjs plan <工程目录>，到点前 node src/hub.mjs run <工程目录>
   · 想先看看效果：node src/demo.mjs（假数据，不碰你的配置）
