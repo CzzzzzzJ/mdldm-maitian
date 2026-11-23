@@ -11,7 +11,7 @@ import * as drv from './driver.mjs';
 const collectors = { bilibili: collectBilibiliVideos, douyin: collectDouyinVideos, xhs: collectXhsVideos };
 export const currentAccountTargets = () => accountTargets(JSON.parse(fs.readFileSync(CFG, 'utf8')));
 
-async function bilibiliUid() {
+export async function bilibiliUid() {
   const uid = await drv.withTab('https://api.bilibili.com/x/web-interface/nav', tab =>
     drv.evaluate(tab, `(()=>{try{const x=JSON.parse((document.querySelector('pre')||document.body).textContent);
       const mid=x.data?.mid; return x.code===0&&x.data?.isLogin&&(typeof mid==='string'||Number.isSafeInteger(mid)) ? String(mid) : ''}catch{return ''}})()`), { wait: 2500 });

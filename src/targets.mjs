@@ -24,7 +24,10 @@ export function accountsOf(cfg) {
   return accounts.toSorted((a, b) => a?.id === 'default' ? -1 : b?.id === 'default' ? 1 : 0).map(a => {
     if (!a || typeof a.id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,47}$/.test(a.id) || ids.has(a.id)) throw new Error('B站账号标识无效或重复');
     ids.add(a.id);
-    if (typeof a.name !== 'string' || !a.name.trim() || a.name.trim().length > 40) throw new Error('B站账号名称应为 1–40 个字符');
+    // The original account collector accepted an ID and UID without a display name.
+    const label = typeof a.name === 'string' ? a.name.trim() : '';
+    const name = label && label !== '默认账号' ? label : a.id === 'default' ? '默认账号' : a.id;
+    if (name.length > 40 && name !== a.id) throw new Error('B站账号名称应为 1–40 个字符');
     if ((a.enabled !== undefined && typeof a.enabled !== 'boolean') || (a.removed !== undefined && typeof a.removed !== 'boolean')) throw new Error('B站账号启用状态无效');
     const uid = a.uid ?? '';
     if (typeof uid !== 'string' || (uid && !/^[1-9]\d{0,19}$/.test(uid)) || (uid && uids.has(uid))) throw new Error('B站账号 UID 无效或重复');
@@ -34,7 +37,7 @@ export function accountsOf(cfg) {
     if (!Number.isInteger(chromePort) || chromePort < 1024 || chromePort > 65535 || ports.has(chromePort)) throw new Error('B站账号调试端口无效或重复');
     if (profiles.has(chromeProfile)) throw new Error('B站账号不能共用登录目录');
     ports.add(chromePort); profiles.add(chromeProfile);
-    return { ...a, name: a.name.trim(), uid, enabled: a.enabled !== false && !a.removed, chromePort, chromeProfile };
+    return { ...a, name, uid, enabled: a.enabled !== false && !a.removed, chromePort, chromeProfile };
   });
 }
 export function getTargets(cfg) {

@@ -2,6 +2,8 @@
 // 另外提供独立的 B 站采集账号配置接口，不改发布设置。
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { accountsOf } from './targets.mjs';
 import { config, CFG } from './feishu.mjs';
 import * as drv from './driver.mjs';
@@ -56,22 +58,46 @@ export function bilibiliAccountView(cfg = config) {
   return accountsOf(cfg).filter(a => !a.removed).map(({ id, name, uid, enabled }) => ({ id, name, uid, enabled }));
 }
 
-export function replaceBilibiliAccounts(cfg, body) {
+// Historical bindings are read only when editing accounts. The traffic collector
+// may already know an account's UID even when its config has no UID.
+function historicalBindings(db) {
+  const ids = new Map();
+  if (!db) return ids;
+  const rows = db.prepare("SELECT platform,uid FROM account_traffic_identity WHERE platform='bilibili' OR platform GLOB 'bilibili@*'").all();
+  for (const { platform, uid } of rows) ids.set(platform === 'bilibili' ? 'default' : platform.slice(9), uid);
+  return ids;
+}
+
+export function replaceBilibiliAccounts(cfg, body, bindings = new Map()) {
   const fields = ['id', 'name', 'uid', 'enabled'];
-  if (!isObject(body) || body.action !== 'replace' || Object.keys(body).some(k => k !== 'action' && k !== 'bilibiliAccounts') || !Array.isArray(body.bilibiliAccounts)) throw new InvalidBilibiliAccounts('账号设置格式无效');
+  if (!isObject(body) || body.action !== 'replace' || Object.keys(body).some(k => !['action','bilibiliAccounts','expectedAccounts'].includes(k)) || !Array.isArray(body.bilibiliAccounts)) throw new InvalidBilibiliAccounts('账号设置格式无效');
+  if (body.expectedAccounts !== undefined && !isDeepStrictEqual(body.expectedAccounts, bilibiliAccountView(cfg))) {
+    throw Object.assign(new InvalidBilibiliAccounts('账号设置已变化，请刷新后再保存'), { status: 409 });
+  }
   const old = cfg.bilibiliAccounts ?? [];
-  if (!Array.isArray(old)) throw new InvalidBilibiliAccounts('现有账号设置无效，请检查 config.json');
-  const previous = new Map(old.map(a => [a?.id, a]));
+  if (!Array.isArray(old) || old.some(a => !isObject(a))) throw new InvalidBilibiliAccounts('现有账号设置无效，请检查 config.json');
+  const previous = new Map(old.map(a => [a.id, a]));
+  const removedByUid = new Map(old.filter(a => a.removed).map(a => [a.uid || bindings.get(a.id), a]));
+  const historicalOwner = new Map([...bindings].map(([id, uid]) => [uid, id]));
   const ids = new Set();
   const next = body.bilibiliAccounts.map(a => {
-    if (!isObject(a) || Object.keys(a).some(k => !fields.includes(k)) || typeof a.id !== 'string' || typeof a.name !== 'string' || typeof a.uid !== 'string' || typeof a.enabled !== 'boolean' || ids.has(a.id)) throw new InvalidBilibiliAccounts('B站账号字段无效或账号重复');
-    ids.add(a.id);
-    const row = { ...previous.get(a.id), id: a.id, name: a.name.trim(), uid: a.uid, enabled: a.enabled };
+    if (!isObject(a) || Object.keys(a).some(k => !fields.includes(k)) || typeof a.id !== 'string' || typeof a.name !== 'string' || !a.name.trim() || typeof a.uid !== 'string' || (a.enabled !== undefined && typeof a.enabled !== 'boolean')) throw new InvalidBilibiliAccounts('B站账号字段无效');
+    const restore = !a.id && a.uid && removedByUid.get(a.uid);
+    const before = previous.get(a.id) || restore;
+    const id = before?.id || a.id || 'a' + randomUUID().replaceAll('-', '');
+    if (ids.has(id)) throw new InvalidBilibiliAccounts('B站账号重复');
+    ids.add(id);
+    const historicalUid = bindings.get(id);
+    if (historicalOwner.has(a.uid) && historicalOwner.get(a.uid) !== id) throw new InvalidBilibiliAccounts('B站账号 UID 已绑定到其他账号');
+    const changed = a.uid !== (before?.uid || '');
+    if ((changed && historicalUid && a.uid !== historicalUid) || (before?.removed && before.uid && changed)) {
+      throw new InvalidBilibiliAccounts('B站账号 UID 与原账号不一致');
+    }
+    const row = { ...before, id, name: a.name.trim(), uid: a.uid, enabled: a.enabled ?? (before?.enabled !== false) };
     delete row.removed;
     return row;
   });
   for (const a of old) {
-    if (!a || !isObject(a)) throw new InvalidBilibiliAccounts('现有账号设置无效，请检查 config.json');
     if (!ids.has(a.id)) next.push(a.id === 'default' ? a : { ...a, removed: true });
   }
   try { accountsOf({ ...cfg, bilibiliAccounts: next }); }
@@ -79,23 +105,45 @@ export function replaceBilibiliAccounts(cfg, body) {
   return next;
 }
 
-export function saveBilibiliAccounts(body) {
-  // 在写入前读取磁盘，保留所有其他设置；同步写入和换名避免同一进程
-  // 的并发请求交错，也避免写入失败留下半个 JSON。
-  const cfgPath = fs.realpathSync(CFG);
-  const disk = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  const next = replaceBilibiliAccounts(disk, body);
-  const updated = { ...disk, bilibiliAccounts: next };
-  const tmpDir = fs.mkdtempSync(path.join(path.dirname(cfgPath), '.bilibili-accounts-'));
-  const tmpFile = path.join(tmpDir, 'config.json');
+// Read the current file and atomically replace only the settings being edited.
+function updateSettings(change, backup = false) {
+  const file = fs.realpathSync(CFG);
+  const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const patch = change(disk);
+  const temp = path.join(path.dirname(file), '.platform-settings-' + randomUUID());
   try {
-    fs.writeFileSync(tmpFile, JSON.stringify(updated, null, 2) + '\n', { mode: fs.statSync(cfgPath).mode & 0o777 });
-    fs.renameSync(tmpFile, cfgPath);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-  config.bilibiliAccounts = next;
-  return { bilibiliAccounts: bilibiliAccountView(updated) };
+    fs.writeFileSync(temp, JSON.stringify({ ...disk, ...patch }, null, 2) + '\n', { mode: fs.statSync(file).mode & 0o777, flag: 'wx' });
+    if (backup) fs.copyFileSync(file, file + '.bak');
+    fs.renameSync(temp, file);
+  } finally { fs.rmSync(temp, { force: true }); }
+  Object.assign(config, patch);
+}
+
+export function saveBilibiliAccounts(body, db) {
+  updateSettings(disk => ({ bilibiliAccounts: replaceBilibiliAccounts(disk, body, historicalBindings(db)) }));
+  return { bilibiliAccounts: bilibiliAccountView() };
+}
+
+export function setPlatformEnabled(platform, on, platforms, accountId) {
+  if (!platforms.includes(platform) || typeof on !== 'boolean') throw new InvalidBilibiliAccounts('平台设置无效');
+  if (accountId !== undefined && (platform !== 'bilibili' || typeof accountId !== 'string')) throw new InvalidBilibiliAccounts('B站账号设置无效');
+  updateSettings(disk => {
+    if (accountId === undefined) {
+      const off = new Set(disk.disabled || []);
+      // Existing clients toggle the entire platform, including any Bilibili accounts.
+      on ? off.delete(platform) : off.add(platform);
+      return { disabled: [...off].sort() };
+    }
+    const accounts = bilibiliAccountView(disk);
+    if (!accounts.some(a => a.id === accountId)) throw new InvalidBilibiliAccounts('没有这个 B站账号');
+    const records = disk.bilibiliAccounts || [];
+    // The default account may be implicit in configurations written before account rows.
+    const next = records.some(a => a.id === accountId)
+      ? records.map(a => a.id === accountId ? { ...a, enabled: on } : a)
+      : [...records, { id: accountId, enabled: on }];
+    return { bilibiliAccounts: next };
+  }, true);
+  return { ok: true, disabled: config.disabled || [] };
 }
 
 // ---------- 测试（只读，用调用方给的字段，不写库） ----------

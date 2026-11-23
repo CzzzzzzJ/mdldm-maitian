@@ -3,7 +3,7 @@ import http from 'node:http'; import crypto from 'node:crypto'; import fs from '
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
 import { SITE, siteOn, refreshSite, matchesSiteData } from './site.mjs';
-import { applyFeishuPatch, applySitePatch, saveConfig, testSite } from './config-admin.mjs';
+import { applyFeishuPatch, applySitePatch, saveConfig, testSite, bilibiliAccountView, saveBilibiliAccounts, setPlatformEnabled, InvalidBilibiliAccounts } from './config-admin.mjs';
 import { learnOn, learnUrl } from './learn.mjs';
 import { buildSalesSummary, salesDateRange } from './sales.mjs';
 import { review } from './review.mjs';
@@ -21,7 +21,25 @@ const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
 const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
-const platformList = () => PLATFORMS.filter(id => id !== 'zsz' || !SITE?.salesOnly).map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
+const loginMeta = db.prepare("SELECT key,value FROM meta WHERE key GLOB 'login*:*'");
+function platformHealth() {
+  const meta = new Map(loginMeta.all().map(row => [row.key, row.value]));
+  const disabled = new Set(config.disabled || []);
+  const status = id => ({
+    state: meta.get('login:' + id) || '', reason: meta.get('loginReason:' + id) || '', day: meta.get('loginDay:' + id) || '',
+  });
+  // 保留按平台的接口；系统页另取账号维度的状态。
+  const platforms = PLATFORMS.map(id => ({ id, name: NAMES[id], disabled: disabled.has(id), ...status(id) }));
+  const accountRows = platforms.flatMap(row => {
+    if (row.id !== 'bilibili') return [row];
+    return bilibiliAccountView().map(account => {
+      const id = account.id === 'default' ? row.id : row.id + '@' + account.id;
+      return { id, platform: row.id, accountId: account.id, name: account.name === '默认账号' ? row.name : row.name + ' · ' + account.name,
+        groupDisabled: row.disabled, disabled: row.disabled || !account.enabled, ...status(id) };
+    });
+  });
+  return { platforms, accountRows };
+}
 
 function episodeView(ep, full = false) {
   const snap = getSnapshot(ep.id), pj = (snap && JSON.parse(snap.project)) || readPj(ep.dir) || { platforms: {} };
@@ -190,15 +208,20 @@ async function handle(req, res) {
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
   }
+  if (req.method === 'POST' && ['/api/action', '/api/platform-toggle', '/api/bilibili-accounts'].includes(u.pathname)) {
+    const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+    if (req.headers['sec-fetch-site'] === 'cross-site' || (req.headers.origin && req.headers.origin !== protocol + '://' + req.headers.host)) {
+      return send(res, 403, { error: '不接受其他网站发起的操作' });
+    }
+  }
   if (u.pathname === '/api/bilibili-accounts') {
-    const { bilibiliAccountView, saveBilibiliAccounts, InvalidBilibiliAccounts } = await import('./config-admin.mjs');
     if (req.method === 'GET') return send(res, 200, { bilibiliAccounts: bilibiliAccountView() });
     if (req.method !== 'POST') return send(res, 405, { error: '请求方法不支持' }, undefined, { allow: 'GET, POST' });
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, { error: '请发送 JSON' });
     const a = await readJson(req);
-    try { return send(res, 200, saveBilibiliAccounts(a)); }
+    try { return send(res, 200, saveBilibiliAccounts(a, db)); }
     catch (e) {
-      return e instanceof InvalidBilibiliAccounts ? send(res, 400, { error: e.message }) : send(res, 500, { error: '保存 B 站账号失败' });
+      return e instanceof InvalidBilibiliAccounts ? send(res, e.status || 400, { error: e.message }) : send(res, 500, { error: '保存 B 站账号失败' });
     }
   }
   if (u.pathname.startsWith('/static/')) { const f = path.join(DIR, 'web', path.basename(u.pathname)); if (!/\.(css|js|png)$/.test(f) || !fs.existsSync(f)) return send(res, 404, ''); return send(res, 200, fs.readFileSync(f), f.endsWith('.css') ? 'text/css; charset=utf-8' : f.endsWith('.png') ? 'image/png' : 'text/javascript; charset=utf-8'); }
@@ -217,14 +240,14 @@ async function handle(req, res) {
       orders: readable ? db.prepare('SELECT id,title,amount,status,time,kind FROM site_orders ORDER BY time DESC,id DESC LIMIT 10').all() : [],
       syncedAt: readable && getMeta('siteLiveSyncedAt'), ordersSyncedAt: readable && getMeta('siteOrdersSyncedAt'), error: getMeta('siteError'), ordersError: getMeta('siteOrdersError') }) : null;
     const episodeRows = episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e));
-    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
+    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: process.env.HUB_DRIVER || config.driver || 'direct',
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
       site: { days: siteDays, channels: readable && !salesOnly ? db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all() : [],
         campaigns: readable && !salesOnly ? db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all() : [], campaignsOn: SITE && !salesOnly && getMeta('siteCampaigns') === 'on', ...(sales && { sales }) },
       metrics: db.prepare('SELECT day, episode_id, platform, views, likes, comments, favorites, shares FROM metrics ORDER BY day').all(),
       followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
       samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(),
-      feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', platforms: platformList() }, now: new Date().toISOString() });
+      feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', ...platformHealth() }, now: new Date().toISOString() });
   }
   if (u.pathname === '/site-logo') { const f = SITE && config.site.logo && path.resolve(ROOT, config.site.logo); return f && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
@@ -308,38 +331,41 @@ async function handle(req, res) {
     return send(res, 200, r);
   }
   if (u.pathname === '/api/platform-toggle' && req.method === 'POST') {
-    let body = ''; req.on('data', d => body += d); req.on('end', () => {
-      let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
-      const id = a.platform, on = a.on !== false;
-      if (!PLATFORMS.includes(id)) return send(res, 400, { error: '平台不对' });
-      const cur = new Set(config.disabled || []); on ? cur.delete(id) : cur.add(id);
-      config.disabled = [...cur].sort();
-      try { if (fs.existsSync(CFG)) fs.copyFileSync(CFG, CFG + '.bak'); fs.writeFileSync(CFG, JSON.stringify(config, null, 2) + '\n'); }
-      catch (e) { config.disabled = [...(new Set(JSON.parse(fs.readFileSync(CFG, 'utf8')).disabled || []))].sort(); return send(res, 500, { error: '写配置失败：' + e.message }); }
-      send(res, 200, { ok: true, disabled: config.disabled });
-    });
-    return;
+    const a = await readJson(req);
+    if (!a || typeof a !== 'object' || Array.isArray(a)) return send(res, 400, { error: '平台设置无效' });
+    try {
+      const on = a.on === undefined && a.accountId === undefined ? true : a.on;
+      return send(res, 200, setPlatformEnabled(a.platform, on, PLATFORMS, a.accountId));
+    } catch (e) {
+      return e instanceof InvalidBilibiliAccounts ? send(res, e.status || 400, { error: e.message }) : send(res, 500, { error: '保存平台状态失败' });
+    }
   }
   if (u.pathname === '/api/action' && req.method === 'POST') {
-    let body = ''; req.on('data', d => body += d); req.on('end', () => {
-      let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
-      const map = { sync: ['sync', a.id], metrics: a.id ? ['metrics', a.id] : ['metrics'],
-        doctor: ['doctor', ...(a.platform && PLATFORMS.includes(a.platform) ? ['--only', a.platform, '--quiet'] : ['--notify'])],
-        board: ['board'], followers: ['followers'],
-        login: ['login', ...(a.platform && PLATFORMS.includes(a.platform) ? ['--only', a.platform] : [])],
-        mark: ['mark', a.id, a.platform, a.state, a.note || '在麦田里标记', ...(a.url ? ['--url', a.url] : [])] };
-      const argv = map[a.type];
-      if (!argv || argv.some(x => x === undefined || x === null || x === '')) return send(res, 400, { error: '不支持的操作' });
-      if (a.type === 'mark' && (a.state !== 'published' || !getEpisode(a.id) || !NAMES[a.platform])) return send(res, 400, { error: '状态不对' });
-      // 登录不受「同一时间只跑一个」限制：掉线时正体检着也要能马上打开登录页
-      if (actions.some(x => !x.done && x.type !== 'mark') && !['mark', 'login'].includes(a.type)) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
-      const rec = { type: a.type, platform: a.platform && PLATFORMS.includes(a.platform) ? a.platform : '', label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: `同步${SITE ? SITE.name : '知识站'}数据`, followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
-      actions.push(rec);
-      const ch = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...argv], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
-      const on = (d) => { rec.tail = (rec.tail + d).slice(-600); }; ch.stdout.on('data', on); ch.stderr.on('data', on);
-      ch.on('close', (code) => { rec.done = true; rec.ok = code === 0; rec.endedAt = new Date().toISOString(); });
-      send(res, 200, { ok: true });
-    });
+    const a = await readJson(req);
+    if (!a || typeof a.type !== 'string') return send(res, 400, { error: '请求格式不对' });
+    let target;
+    if (['doctor', 'login'].includes(a.type) && Object.hasOwn(a, 'platform')) {
+      target = platformHealth().accountRows.find(row => row.id === a.platform);
+      if (!target) return send(res, 400, { error: '没有这个平台或账号' });
+      if (target.disabled) return send(res, 409, { error: '平台或账号已停用' });
+      if (target.accountId && target.accountId !== 'default' && (process.env.HUB_DRIVER || config.driver) === 'plugin') return send(res, 409, { error: 'B站副号需要 direct 模式' });
+    }
+    const map = { sync: ['sync', a.id], metrics: a.id ? ['metrics', a.id] : ['metrics'],
+      doctor: ['doctor', ...(target ? ['--target', target.id, '--quiet'] : ['--notify'])],
+      board: ['board'], followers: ['followers'],
+      login: ['login', ...(target ? ['--target', target.id] : [])],
+      mark: ['mark', a.id, a.platform, a.state, a.note || '在麦田里标记', ...(a.url ? ['--url', a.url] : [])] };
+    const argv = map[a.type];
+    if (!argv || argv.some(x => x === undefined || x === null || x === '')) return send(res, 400, { error: '不支持的操作' });
+    if (a.type === 'mark' && (a.state !== 'published' || !getEpisode(a.id) || !NAMES[a.platform])) return send(res, 400, { error: '状态不对' });
+    // 登录不受「同一时间只跑一个」限制：掉线时正体检着也要能马上打开登录页
+    if (actions.some(x => !x.done && x.type !== 'mark') && !['mark', 'login'].includes(a.type)) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
+    const rec = { type: a.type, platform: target?.id || (a.type === 'mark' ? a.platform : ''), label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: `同步${SITE ? SITE.name : '知识站'}数据`, followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${target?.name || NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+    actions.push(rec);
+    const ch = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...argv], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
+    const on = (d) => { rec.tail = (rec.tail + d).slice(-600); }; ch.stdout.on('data', on); ch.stderr.on('data', on);
+    ch.on('close', (code) => { rec.done = true; rec.ok = code === 0; rec.endedAt = new Date().toISOString(); });
+    send(res, 200, { ok: true });
     return;
   }
   send(res, 404, { error: 'not found' });

@@ -18,15 +18,17 @@
 <div class="page" id="app"><div class="empty" style="height:60vh">加载中…</div></div>
 <script src="/static/mt.js"></script>
 <script>
-let S = null, settingsDirty = false;
+let accountEditor = null;
 let O = null, I = null, F = {}, timer = null, pick = null;
 const toasted = new Set();
 let doctorPrimed = false;
+const systemRows = h => h.accountRows || h.platforms || [];
+const needsDirect = p => p.accountId && p.accountId !== 'default' && O.driver === 'plugin';
 function doctorMsg(a, h) {
   if (!a.ok) { const err = String(a.tail || '').split('\n').map(s => s.trim()).filter(Boolean).slice(-1)[0]; return `体检失败${err ? '：' + err : ''}`; }
-  const ps = (h.platforms || []).filter(p => !p.disabled && (!a.platform || p.id === a.platform));
+  const ps = systemRows(h).filter(p => !p.disabled && !needsDirect(p) && (!a.platform || p.id === a.platform));
   if (a.platform) {
-    const p = (h.platforms || []).find(x => x.id === a.platform) || ps[0];
+    const p = systemRows(h).find(x => x.id === a.platform);
     if (!p) return `${PN[a.platform] || a.platform}：体检完成`;
     if (p.state === 'ok') return `${p.name || PN[p.id] || p.id}：已登录`;
     if (p.state === 'out') return `${p.name || PN[p.id] || p.id}：未登录${p.reason ? ' · ' + p.reason : ''}`;
@@ -34,8 +36,12 @@ function doctorMsg(a, h) {
   }
   const ok = ps.filter(p => p.state === 'ok'), bad = ps.filter(p => p.state && p.state !== 'ok');
   if (!ps.length) return '体检完成';
-  if (!bad.length) return `体检完成：${ok.length} 家全部已登录`;
-  return `体检完成：${ok.length} 家正常，${bad.length} 家掉线（${bad.map(p => p.name || PN[p.id] || p.id).join('、')}）`;
+  if (ok.length === ps.length) return `体检完成：${ok.length} 个账号已登录`;
+  const missing = ps.length - ok.length - bad.length;
+  const summary = [`${ok.length} 个正常`];
+  if (bad.length) summary.push(`${bad.length} 个掉线（${bad.map(p => p.name || PN[p.id] || p.id).join('、')}）`);
+  if (missing) summary.push(`${missing} 个未检查`);
+  return '体检完成：' + summary.join('，');
 }
 function noteDoctorDone(h) {
   const docs = (O.actions || []).filter(x => x.type === 'doctor' && x.done && x.endedAt);
@@ -238,21 +244,27 @@ async function vEpisode(id) {
   ${sec('过程记录')}<div class="panel"><div class="mono">${e.logs.length ? e.logs.map(l => { let r = l.result || ''; try { const j = JSON.parse(r); r = [j.status, j.url, j.note].filter(Boolean).join('  '); } catch {} return `${when(l.ts)}  ${esc(PN[l.platform] || l.platform || '-')}  ${esc(l.action)}  ${esc(r)}`; }).join('\n') : '没有记录'}</div></div>`;
 }
 
-function settingsHTML(s) {
-  const accounts = s.bilibiliAccounts.map((a, i) => `<fieldset class="account-row" data-account data-id="${esc(a.id || '')}" data-uid="${esc(a.uid || '')}">
-    <legend class="sr-only">B站账号 ${i + 1}</legend>
-    <input class="account-name" name="accountName" aria-label="账号名称 ${i + 1}" value="${esc(a.name)}" maxlength="40" required>
-    <span class="account-uid">${a.uid ? `UID ${esc(a.uid)}` : '未绑定'}</span>
-    <label class="account-enabled"><input type="checkbox" name="accountEnabled" ${a.enabled !== false ? 'checked' : ''}>采集账号数据</label>
-    ${a.id !== 'default' ? `<button type="button" class="btn" data-remove-account="${i}" aria-label="移除账号 ${i + 1}">移除</button>` : ''}</fieldset>`).join('');
-  return `<form id="settings-form"><div class="accounts">${accounts}</div>
-    <div class="settings-footer"><button type="button" class="btn" data-add-account ${O.driver === 'plugin' ? 'disabled' : ''}>添加账号</button><button type="submit" class="btn pri">保存</button><span id="settings-message" role="status" aria-live="polite"></span></div></form>`;
+function accountSettingsForm() {
+  const rows = accountEditor.rows.map((a, i) => {
+    const label = a.name || '新账号';
+    return `<fieldset class="account-row" data-account data-id="${esc(a.id)}">
+      <legend class="sr-only">编辑 B站账号 ${i + 1}</legend>${logo('bilibili')}
+      <label>账号名称<input class="account-name" name="accountName" value="${esc(a.name)}" maxlength="40" required></label>
+      <label>UID<input class="account-name account-uid" name="accountUid" value="${esc(a.uid)}" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20" ${accountEditor.original.some(saved => saved.id === a.id && saved.uid) ? 'readonly' : ''}></label>
+      ${a.id === 'default' ? '' : `<button type="button" class="btn" data-remove-account="${i}" aria-label="移除${esc(label)}">移除</button>`}</fieldset>`;
+  }).join('');
+  const group = systemRows(O.health).find(p => p.accountId === 'default');
+  const groupSwitch = group ? abtn({type:'toggle-platform', platform:'bilibili', on:!!group.groupDisabled},
+    group.groupDisabled ? '启用整个B站' : '停用整个B站', '', group.groupDisabled ? '' : '停用整个B站？将暂停 B站投稿、体检和账号作品采集。') : '';
+  return `<form id="settings-form" aria-label="管理B站账号">${rows}
+    <div class="settings-footer"><button type="button" class="btn" data-add-account ${O.driver === 'plugin' ? 'disabled' : ''}>添加B站账号</button>
+    <button type="submit" class="btn pri">保存账号</button><button type="button" class="btn" data-cancel-accounts>取消</button>${groupSwitch}
+    <span id="settings-message" role="status" aria-live="polite"></span></div></form>`;
 }
-function readSettings(form) {
-  return { bilibiliAccounts: [...form.querySelectorAll('[data-account]')].map(row => ({
-    id: row.dataset.id, name: row.querySelector('[name="accountName"]').value.trim(), uid: row.dataset.uid || '',
-    enabled: row.querySelector('[name="accountEnabled"]').checked,
-  })) };
+function readAccountRows(form) {
+  return [...form.querySelectorAll('[data-account]')].map(row => ({
+    id: row.dataset.id, name: row.querySelector('[name="accountName"]').value, uid: row.querySelector('[name="accountUid"]').value,
+  }));
 }
 
 // 集成卡片：飞书 / 知识站
@@ -348,28 +360,33 @@ async function saveSite(fields) {
 
 function platformRow(p) {
   const name = p.name || PN[p.id] || p.id;
-  const [style, icon, state] = p.disabled ? ['off', '–', '已停用'] : p.state === 'ok' ? ['published', '✓', '已登录'] : p.state === 'out' ? ['not_logged_in', '✕', '未登录'] : ['idle', '?', '未检查'];
-  const note = p.disabled ? '停用期间暂停体检和账号数据采集' : p.reason || (p.day ? `上次检查 ${p.day}` : '还没检查过');
+  const [style, icon, state] = p.disabled ? ['off', '–', '已停用'] : needsDirect(p) ? ['idle', '–', '需直连'] : p.state === 'ok' ? ['published', '✓', '已登录'] : p.state === 'out' ? ['not_logged_in', '✕', '未登录'] : ['idle', '?', '未检查'];
+  const paused = p.accountId ? '停用期间暂停体检和作品采集' : '停用期间暂停体检和账号数据采集';
+  const note = p.groupDisabled ? '' : p.disabled ? paused : needsDirect(p) ? '副号体检和登录需要直连模式' :
+    [p.day && `上次检查 ${p.day}`, p.state !== 'ok' && p.reason].filter(Boolean).join(' · ') || '还没检查过';
   const login = p.state === 'ok' ? '打开后台' : '去登录';
   const toggle = p.disabled ? '启用' : '停用';
-  // An account ID is not accepted by the publisher's base-platform actions.
-  const canAct = !p.id.includes('@');
-  return `<div class="prow pl-row${p.disabled ? ' off' : ''}">${logo(p.id)}<span class="pl-name">${esc(name)}<small class="pl-sub">${esc(note)}</small></span>
+  const confirmOff = p.accountId ? `暂停${name}的体检和作品采集？` : `停用${name}？`;
+  const toggleArgs = { type:'toggle-platform', platform:p.platform || p.id, on:!!p.disabled };
+  if (p.accountId) toggleArgs.accountId = p.accountId;
+  const legacyAccount = p.id.includes('@') && !p.accountId;
+  return `<div class="prow pl-row${p.disabled ? ' off' : ''}">${logo(p.id)}<span class="pl-name">${esc(name)}${note ? `<small class="pl-sub">${esc(note)}</small>` : ''}</span>
     <span class="st-chip ${style}"><i>${icon}</i>${state}</span>
-    ${p.disabled || !canAct ? '' : abtn({type:'doctor', platform:p.id}, '检查', '', '', '检查' + name) + abtn({type:'login', platform:p.id}, login, 'pl-login', '', login + ' · ' + name)}
-    ${canAct ? abtn({type:'toggle-platform', platform:p.id, on:p.disabled}, toggle, '', p.disabled ? '' : `停用${name}？`, toggle + name) : ''}</div>`;
+    ${p.disabled || needsDirect(p) || legacyAccount ? '' : abtn({type:'doctor', platform:p.id}, '检查', '', '', '检查' + name) + abtn({type:'login', platform:p.id}, login, 'pl-login', '', login + ' · ' + name)}
+    ${p.groupDisabled || legacyAccount ? '' : abtn(toggleArgs, toggle, '', p.disabled ? '' : confirmOff, toggle + name)}</div>`;
 }
 
 function vSystem() {
-  const h = O.health, today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }), cur = O.episodes?.[0], ps = h.platforms || [];
-  const dates = ps.filter(p => !p.disabled && p.day).map(p => p.day);
+  const h = O.health, today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }), cur = O.episodes?.[0], ps = systemRows(h);
+  const dates = ps.filter(p => !p.disabled && !needsDirect(p) && p.day).map(p => p.day);
   const lastCheck = dates.sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true })).at(-1);
   return `<div class="h1">系统</div><p class="lead">麦田的运行情况与账号设置。</p>
-  <div class="grid g4">${tile('守护进程', '运行中', '开机自启，崩溃自动拉起')}${tile('NAS', h.nas ? '已挂载' : '读不到', h.nas ? '工程目录可读' : '取链接和封面会失败')}${tile('专用浏览器', h.chrome ? '在线' : '没开', '各平台的登录都在这里')}${tile('平台登录', platformSummary(h), lastCheck ? `最近检查 ${esc(lastCheck)}${lastCheck === today ? '（今天）' : ''}` : '点击「检查」可查看账号登录状态')}</div>
+  <div class="grid g4">${tile('守护进程', '运行中', '开机自启，崩溃自动拉起')}${tile('NAS', h.nas ? '已挂载' : '读不到', h.nas ? '工程目录可读' : '取链接和封面会失败')}${tile('专用浏览器', h.chrome ? '在线' : '没开', '各平台的登录都在这里')}${tile('平台登录', platformSummary({platforms:ps.filter(p => !needsDirect(p))}), lastCheck ? `最近检查 ${esc(lastCheck)}${lastCheck === today ? '（今天）' : ''}` : '点击「检查」可查看账号登录状态')}</div>
   ${sec('平台', '登录、体检和常用操作；扫码要人在这台电脑前')}
-  <div class="panel"><div class="btns" style="margin-bottom:4px">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}</div>
-    ${ps.map(platformRow).join('') || '<div class="empty">没有平台</div>'}</div>
-  ${S ? `<details id="account-settings" class="panel settings-panel" ${settingsDirty ? 'open' : ''}><summary>B站账号设置</summary>${settingsHTML(S)}</details>` : ''}
+  <div class="panel platform-settings"><div class="btns platform-controls">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}
+      ${accountEditor || !h.accountRows ? '' : '<button type="button" class="btn manage-accounts" data-manage-accounts>管理B站账号</button>'}</div>
+    ${!accountEditor && ps.some(p => p.groupDisabled) ? '<p class="note">整个B站已停用，可在「管理B站账号」中重新启用。</p>' : ''}
+    ${accountEditor ? accountSettingsForm() + ps.filter(p => p.id.split('@')[0] !== 'bilibili').map(platformRow).join('') : ps.map(platformRow).join('') || '<div class="empty">没有平台</div>'}</div>
   ${sec('集成')}
   <div class="sys-2col sys-itg">
     <div class="panel">
@@ -401,24 +418,14 @@ function vSystem() {
 async function render(forceSettingsRender = false) {
   captureSiteDraft(); captureFsDraft();
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
-  if (!O || (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender)) return;
+  if (!O || (accountEditor && key === 'system' && $('#settings-form') && !forceSettingsRender)) return;
   let body;
   try {
-    if (key === 'system') {
-      if (!settingsDirty) {
-        const settings = await api('/api/bilibili-accounts').catch(() => null);
-        if (!settingsDirty) S = Array.isArray(settings?.bilibiliAccounts) ? settings : null;
-      }
-    }
     body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)();
   } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
   if (h !== (location.hash || '#/traffic')) return;
-  if (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender) return;
-  const visibleForm = $('#settings-form');
-  if (key !== 'system' && settingsDirty && visibleForm) S = { ...S, ...readSettings(visibleForm) };
-  const accountSettingsOpen = key === 'system' && $('#account-settings')?.open;
+  if (accountEditor && key === 'system' && $('#settings-form') && !forceSettingsRender) return;
   app.innerHTML = topbar(O, key) + body;
-  if (accountSettingsOpen && $('#account-settings')) $('#account-settings').open = true;
   after();
   if (fsDraft != null) { const wh = $('#fs-webhook'); if (wh) wh.value = fsDraft; }
 }
@@ -436,18 +443,25 @@ async function refreshAccountTraffic() {
   await render();
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
-document.addEventListener('input', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
-document.addEventListener('change', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
+document.addEventListener('input', e => {
+  const form = e.target.closest?.('#settings-form');
+  if (form && accountEditor) accountEditor.rows = readAccountRows(form);
+});
 document.addEventListener('submit', async (e) => {
-  if (e.target.id !== 'settings-form') return; e.preventDefault();
-  const form = e.target, button = form.querySelector('[type="submit"]'), status = $('#settings-message'); button.disabled = true;
+  if (e.target.id !== 'settings-form') return;
+  e.preventDefault();
+  const form = e.target;
+  if (!accountEditor || form.dataset.saving === 'true') return;
+  const button = form.querySelector('[type="submit"]'), status = $('#settings-message');
+  form.dataset.saving = 'true'; form.inert = true; button.disabled = true;
   try {
-    await postJson('/api/bilibili-accounts', { action: 'replace', ...readSettings(form) });
-    settingsDirty = false;
+    await postJson('/api/bilibili-accounts', { action:'replace', expectedAccounts:accountEditor.original, bilibiliAccounts:readAccountRows(form) });
+    accountEditor = null;
     await load();
-    toast('已保存');
+    $('[data-manage-accounts]')?.focus();
+    toast('已保存账号');
   } catch (err) { status.textContent = err.message; }
-  finally { button.disabled = false; }
+  finally { button.disabled = false; form.inert = false; delete form.dataset.saving; }
 });
 document.addEventListener('click', async (e) => {
   const ab = e.target.closest('[data-account-action]');
@@ -466,9 +480,35 @@ document.addEventListener('click', async (e) => {
   const ts = e.target.closest('[data-traffic-source]'); if (ts) { trafficSource = ts.dataset.trafficSource; await render(); return; }
   const tp = e.target.closest('[data-traffic-page]'); if (tp) { trafficPage = Math.max(0, Number(tp.dataset.trafficPage) || 0); await render(); return; }
   const pk = e.target.closest('[data-pick]'); if (pk) { e.preventDefault(); pick = pk.dataset.pick; render(); return; }
+  const manage = e.target.closest('[data-manage-accounts]');
+  if (manage) {
+    manage.disabled = true;
+    try {
+      const { bilibiliAccounts } = await api('/api/bilibili-accounts');
+      accountEditor = { original:bilibiliAccounts, rows:bilibiliAccounts.map(({id, name, uid}) => ({id, name, uid})) };
+      await render(true);
+      $('#settings-form [name="accountName"]')?.focus();
+    } catch (err) { toast(err.message); } finally { manage.disabled = false; }
+    return;
+  }
   const form = $('#settings-form');
-  if (form && e.target.closest('[data-add-account]')) { S = { ...S, ...readSettings(form) }; S.bilibiliAccounts.push({ id: '', name: '', uid: '', enabled: true }); settingsDirty = true; await render(true); $('#settings-form [data-account]:last-child [name="accountName"]')?.focus(); return; }
-  const rm = e.target.closest('[data-remove-account]'); if (form && rm) { S = { ...S, ...readSettings(form) }; if (S.bilibiliAccounts[+rm.dataset.removeAccount].id !== 'default') S.bilibiliAccounts.splice(+rm.dataset.removeAccount, 1); settingsDirty = true; await render(true); return; }
+  if (form && accountEditor && (e.target.closest('[data-add-account]') || e.target.closest('[data-remove-account]') || e.target.closest('[data-cancel-accounts]'))) {
+    if (form.dataset.saving === 'true') return;
+    if (e.target.closest('[data-cancel-accounts]')) {
+      accountEditor = null; await render(true); $('[data-manage-accounts]')?.focus();
+      return;
+    }
+    accountEditor.rows = readAccountRows(form);
+    const remove = e.target.closest('[data-remove-account]');
+    if (remove) {
+      const index = Number(remove.dataset.removeAccount);
+      if (accountEditor.rows[index]?.id !== 'default') accountEditor.rows.splice(index, 1);
+    } else accountEditor.rows.push({ id:'', name:'', uid:'' });
+    await render(true);
+    if (remove) $('[data-add-account]')?.focus();
+    else $('#settings-form [data-account]:last-of-type [name="accountName"]')?.focus();
+    return;
+  }
   const control = e.target.closest('[data-fs]') || e.target.closest('[data-site]');
   if (control) {
     I ||= { feishu: {}, site: {} };
@@ -502,18 +542,22 @@ document.addEventListener('click', async (e) => {
     return;
   }
   const b = e.target.closest('[data-act]'); if (!b) return; const a = JSON.parse(b.dataset.act);
-  if ((a.accountId || a.type === 'toggle-platform') && settingsDirty) { toast('先保存账号设置'); return; }
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
   b.disabled = true;
   try {
     if (a.type === 'toggle-platform') {
-      await postJson('/api/platform-toggle', { platform: a.platform, on: a.on });
+      const {type, ...fields} = a;
+      await postJson('/api/platform-toggle', fields);
       toast(a.on ? '已启用' : '已停用');
       await load();
+      if (accountEditor && a.platform === 'bilibili' && !a.accountId) {
+        await render(true);
+        $('#settings-form .settings-footer [data-act]')?.focus();
+      }
       return;
     }
     await postJson('/api/action', a);
-    toast(a.type === 'doctor' ? (a.platform ? `开始检查${PN[a.platform] || a.platform}…` : '开始全部检查…') : '已开始，跑完会自动刷新');
+    toast(a.type === 'doctor' ? (a.platform ? `开始检查${systemRows(O.health).find(p => p.id === a.platform)?.name || PN[a.platform] || a.platform}…` : '开始全部检查…') : '已开始，跑完会自动刷新');
     await load(); poll();
   } catch (err) { toast(err.message); }
   finally { b.disabled = false; }

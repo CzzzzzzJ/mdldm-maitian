@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 发布中控：分批发布、状态落盘、防重、飞书通知、自动取链接
-//   hub login [--only a,b]                      打开专用 Chrome 的平台登录页，供你登录（网页「系统 → 平台」按平台打开）
-//   hub doctor [--only a,b] [--quiet]           检查平台登录态和上传页结构（不上传、不填写），结果给网页用
+//   hub login [--target 账号 | --only a,b]                      打开专用 Chrome 的平台登录页，供你登录（网页「系统 → 平台」按平台打开）
+//   hub doctor [--target 账号 | --only a,b] [--quiet]           检查平台登录态和上传页结构（不上传、不填写），结果给网页用
 //   hub run <工程目录> [--only a,b] [--force]   发起（或续跑）一期
 //   hub status [id] [--logs]                    看状态
 //   hub sync <id> [--only a,b]                  取链接、更新状态，写回发布记录
@@ -17,6 +17,7 @@ import { collectors } from './metrics.mjs';
 import { boardSync, syncSalesIfDue } from './board.mjs';
 const board = (o) => boardSync(o).then((r) => { if (r) console.log('看板已同步：' + JSON.stringify(r)); return r; }).catch((e) => { console.error('看板同步出错：' + e.message); });
 import { config, notify } from './feishu.mjs';
+import { systemActionTargets, checkSystemLogins } from './system-accounts.mjs';
 import { collectFollowers } from './followers.mjs';
 import * as drv from './driver.mjs';
 import { SITE } from './site.mjs';
@@ -337,18 +338,17 @@ async function metricsReport(list, { accounts = true } = {}) {
 }
 
 async function doctor() {
+  const targets = systemActionTargets(config, ALL(), cmd === 'doctor' ? args.slice(1) : []);
+  if (!targets.length) return [];
   const p = pluginInfo();
   if (!p.dir) throw new Error(`还没装麦田发布助手：运行 node src/hub.mjs login，在专用 Chrome 里从应用商店添加（${STORE_URL}）`);
   console.log(`麦田发布助手：${p.source === 'store' ? '商店版' : '本地'} ${p.version || ''}`);
-  await drv.ensure();
-  const only = opt('--only') ? opt('--only').split(',').filter(id => LOGIN_PAGES[id]) : null;
-  const ids = (only || ALL()).filter(canPublish);
-  const r = await drv.checkLogin(ids);
-  const lines = ids.map(id => `${NAMES[id]}：${r[id] && r[id].ok ? '✅ 已登录，上传页正常' : `❌ ${r[id] ? r[id].reason : '没有结果'}`}`);
-  const bad = ids.filter(id => !(r[id] && r[id].ok));
+  const r = await checkSystemLogins(targets);
+  const lines = targets.map(({ id, name }) => `${name}：${r[id] && r[id].ok ? '✅ 已登录，上传页正常' : `❌ ${r[id] ? r[id].reason : '没有结果'}`}`);
+  const bad = targets.filter(t => !r[t.id]?.ok).map(t => t.name);
   // 状态落盘，给网页「系统 → 平台」和顶栏的灯用（不再只看 keepAlive 那一家）
-  const day = new Date().toLocaleDateString('zh-CN');
-  for (const id of ids) {
+  const day = new Date().toLocaleDateString('zh-CN', { timeZone:'Asia/Shanghai' });
+  for (const { id } of targets) {
     const ok = !!(r[id] && r[id].ok);
     setMeta(`login:${id}`, ok ? 'ok' : 'out');
     setMeta(`loginReason:${id}`, ok ? '' : (r[id] ? r[id].reason : '没有结果'));
@@ -499,8 +499,8 @@ async function daemon() {
         if (!getTasks(ep.id).some(t => t.state === 'planned') || getMeta(`eve:${ep.id}`)) continue;
         setMeta(`eve:${ep.id}`, Date.now());
         const bad = await doctor().catch(() => null);
-        if (bad && !bad.length) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，${ALL().length} 个平台登录都正常`);
-        else if (bad) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，今晚先把这些平台登录好：${bad.map(i => NAMES[i]).join('、')}`);
+        if (bad && !bad.length) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，所有已检查的账号登录都正常`);
+        else if (bad) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，今晚先把这些平台登录好：${bad.join('、')}`);
       }
       // 每天上午体检一次，有平台掉线才通知
       const day = new Date().toLocaleDateString('zh-CN');
@@ -533,15 +533,18 @@ try {
     await sync(getEpisode(ep.id)); console.log(table(ep.id));
   }
   else if (cmd === 'login') {
-    // --only bilibili,channels：只开这几家（系统页按平台登录用）；不带就全开
-    const only = opt('--only') ? opt('--only').split(',') : null;
-    const loginIds = SITE?.salesOnly && !DISABLED.has('zsz') ? [...ALL(), 'zsz'] : ALL();
-    const ids = only ? loginIds.filter(id => only.includes(id)) : loginIds;
-    if (!ids.length) throw new Error('没有可打开的平台（都被停用了？）');
-    const p = pluginInfo(), needStore = ids.some(canPublish) && p.source !== 'local' && !p.dir;
-    await drv.openForLogin([...(needStore ? [STORE_URL] : []), ...ids.map(i => LOGIN_PAGES[i])]);
+    const platforms = SITE?.salesOnly && !DISABLED.has('zsz') ? [...ALL(), 'zsz'] : ALL();
+    const targets = systemActionTargets(config, platforms, args.slice(1));
+    if (!targets.length) throw new Error('没有可打开的平台或账号');
+    const primary = targets.filter(t => !t.accountId || t.accountId === 'default');
+    const secondary = targets.filter(t => t.accountId && t.accountId !== 'default');
+    const p = pluginInfo(), exact = args.some(a => a === '--target' || a.startsWith('--target='));
+    const needStore = !exact && primary.some(t => canPublish(t.id)) && p.source !== 'local' && !p.dir;
+    if (primary.length) await drv.openForLogin([...(needStore ? [STORE_URL] : []),
+      ...primary.map(t => t.id === 'bilibili' && exact ? 'https://member.bilibili.com/' : LOGIN_PAGES[t.id])]);
+    for (const target of secondary) await drv.openTrafficLogin(target);
     if (needStore) console.log(`第一步：在专用 Chrome 里的应用商店页面点「添加至 Chrome」，装上麦田发布助手（之后 Chrome 会自动更新它）`);
-    console.log(`专用 Chrome 已打开 ${ids.length} 个平台页面，登录完运行 hub doctor 检查`);
+    console.log(`专用 Chrome 已打开 ${targets.length} 个平台页面，登录完运行 hub doctor 检查`);
   }
   else if (cmd === 'metrics-accounts') { SKIP_METRICS = (opt('--skip') || '').split(','); await accountMetricsReport(); }
   else if (cmd === 'metrics-login') {
@@ -561,6 +564,6 @@ try {
     for (const e of list) { console.log(`\n【${e.id}】${e.name}  定时 ${e.schedule || '立即'}\n${table(e.id)}`); if (args.includes('--logs')) console.log(recentLogs(e.id).map(l => `  ${l.ts.slice(11, 19)} ${l.platform} ${l.action} ${l.result}`).join('\n')); }
   } else if (cmd === 'mark') { setTask(args[1], args[2], args[3], (args[4] && !args[4].startsWith('--') ? args[4] : '人工标记'), { url: opt('--url') || undefined }); log(args[1], args[2], 'mark', args[3]); console.log(table(args[1])); }
   else if (cmd === 'notify-test') await notify('发布中控已接通 ✅');
-  else console.log('用法：hub login [--only a,b] | doctor [--only a,b] [--quiet] | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | metrics-accounts [--skip a,b] | metrics-login <bilibili[@账号]> | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon');
+  else console.log('用法：hub login [--target 账号 | --only a,b] | doctor [--target 账号 | --only a,b] [--quiet] | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | metrics-accounts [--skip a,b] | metrics-login <bilibili[@账号]> | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon');
 } catch (e) { console.error('出错：' + e.message); if (!e.quiet) await notify(`❌ 发布中控出错：${e.message.slice(0, 300)}${helpTip()}`); code = 1; }
 await drv.close(); db.close(); process.exit(code);
