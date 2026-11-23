@@ -14,6 +14,7 @@
   <a href="#看它跑一遍">看它跑一遍</a> ·
   <a href="#怎么配合">怎么配合</a> ·
   <a href="#各平台的坑实战总结">各平台的坑</a> ·
+  <a href="docs/faq.md">常见问题</a> ·
   <a href="SHOWCASE.md">用户案例</a> ·
   <a href="CONTRIBUTING.md">参与贡献</a> ·
   <a href="#作者">作者</a>
@@ -113,7 +114,8 @@ node src/hub.mjs doctor                 # 登录完检查各平台登录态和�
   - X、YouTube、Instagram、自有站点：回读文案和定时一致后自动提交，只点一次。
   - B站、抖音、小红书、视频号、快手：**填好就停**，等你自己点「发布 / 定时发布」，守护进程每 20 分钟提醒。
   - 防重：库里已经到位的平台不再跑；X 定时列表、YouTube Studio、Instagram 主页、站点后台已有同名的不再传。
-- **长势（流量和粉丝）**：每天上午采一次各期在各平台的播放和互动、各平台粉丝数；新一期头三天每 6 小时采一次。
+- **长势（流量和粉丝）**：每天上午采一次各期在各平台的播放和互动、各平台粉丝数；新一期头三天每 6 小时采一次。「账号作品」能单独查看 B站、抖音、小红书现有作品，不用登记发布工程。点「采集账号流量」或运行 `node src/hub.mjs metrics-accounts`；直连模式会自动启动专用 Chrome，首次需先登录。可在 `config.json` 中设置 `"accountTrafficAuto": true`，随每天的流量日报采集。失败时保留上次成功数据。
+  - B站副号可在 `bilibiliAccounts` 配置（例如 `[{ "id": "second", "name": "副号" }]`）。副号需要 `direct` 模式并使用独立的调试端口和 Chrome 登录目录（默认按 ID 分配，亦可显式设置 `chromePort`、`chromeProfile`）。可填 `uid` 防止登错号；首次成功采集后也会校验历史归属。副号不参与发布。
 - **收成（转化，可选）**：接上自有站点后，看注册、会员、订单、收入从哪个渠道、哪一期来。
 - **日历**：上周到未来两周，已发布、已定时、等你点、计划中的期一眼看清。
 - **粮仓（档案）**：每期的封面、文案快照、各平台链接、过程日志。
@@ -163,7 +165,9 @@ node src/hub.mjs status [id] [--logs]
 node src/hub.mjs sync <id> [--only a,b]     # 取链接，写 发布记录.json，回填发布素材 md 的「已发布」行
 node src/hub.mjs mark <id> <平台> <状态> [备注] [--url 链接]   # 手动改状态（平台认不出时用）
 node src/hub.mjs adopt <工程目录>            # 登记一期已经发过的（不上传），按标题取链接
-node src/hub.mjs metrics [id]               # 采流量并发日报
+node src/hub.mjs metrics [id]               # 采发布工程流量并发日报
+node src/hub.mjs metrics-accounts [--skip a,b] # 只读采集已发布的账号作品
+node src/hub.mjs metrics-login bilibili@second # 在专用 Chrome 里打开 B站副号登录页
 node src/hub.mjs followers                  # 采粉丝
 node src/hub.mjs review <id> [天数] [--notify]   # 看某期发布 N 天的复盘（守护进程会在第 1/3/7 天自动发）
 node src/hub.mjs weekly [--notify]          # 上周周报（守护进程每周一自动发）
@@ -184,9 +188,45 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 | `auto` / `manual` | 自动提交 / 等你点发布的平台 |
 | `keepAlive` | 容易掉登录的平台（视频号），定时刷一下保活 |
 | `disabled` | 停用的平台（如 `["instagram"]`）：不体检、不打开登录页、不发布、不采粉丝。网页「系统 → 平台」里也能开关 |
+| `bilibiliAccounts` | 可选的 B 站采集账号配置；这项配置不改变发布账号或发布流程 |
 | `site` | 自有站点，可选，见下 |
 | `board` | 飞书多维表格看板，可选 |
 | `web.key` | 网页口令，所有页面和接口没有口令一律 401 |
+
+多账号采集配置示例（可选）：
+
+```json
+"bilibiliAccounts": [
+  { "id": "default", "name": "主号", "uid": "123456", "enabled": true },
+  { "id": "second", "name": "副号", "uid": "234567", "enabled": true }
+]
+```
+
+`default` 始终继承现有的 `chromePort` 和 `chromeProfile`；未填写时仍使用默认账号。副号默认使用独立端口和登录目录，也可用 `chromePort`、`chromeProfile` 单独指定，不能与其他账号重复。用户 ID（UID）用字符串填写。将 `bilibili` 放进 `disabled` 会停用整个 B 站；仅停用副号则把该账号的 `enabled` 设为 `false`。这里仅定义配置，实际按账号采集需要对应的采集功能。
+
+</details>
+
+<details>
+<summary><b>接入小鹅通销售看板（可选）</b></summary>
+
+在本地 `config.json` 中配置店铺，然后重启麦田。将 `shopName` 填为后台显示的完整店铺名。
+
+```json
+{
+  "site": {
+    "provider": "xiaoe",
+    "enabled": true,
+    "name": "小鹅通",
+    "shopName": "你的店铺名称",
+    "base": "https://admin.xiaoe-tech.com",
+    "adminPath": "/t/merchant/index"
+  }
+}
+```
+
+运行 `node src/hub.mjs login --only zsz`，在麦田专用 Chrome 中登录并进入店铺。运行 `node src/hub.mjs board` 首次同步，随后可在大屏和「销售」查看当天、近 7 天、近 30 天的支付、退款、订单及最近 10 笔订单。守护进程每 10 分钟更新一次，按北京时间每日补齐最近 30 个完整自然日。订单仅保存编号、商品、金额、状态和下单时间。销售模式下，小鹅通不参与课程发布。
+
+已结束日期的退款来自每日统计。需要当天退款时，可在 `site.refundQuery` 中填写当前店铺后台「退款趋势图」查询的 JSON 请求体（只需请求体，无需请求头或 Cookie）。同步时会自动替换日期，按「退款金额」字段取值。缺少当天报表或数据时，退款和支付净额显示为「–」。每个销售数据库绑定一家店铺，换店时请使用单独的 `MAITIAN_DB` 数据库路径。
 
 </details>
 

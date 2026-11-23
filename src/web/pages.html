@@ -18,6 +18,7 @@
 <div class="page" id="app"><div class="empty" style="height:60vh">加载中…</div></div>
 <script src="/static/mt.js"></script>
 <script>
+let S = null, settingsDirty = false;
 let O = null, I = null, F = {}, timer = null, pick = null;
 const toasted = new Set();
 let doctorPrimed = false;
@@ -27,14 +28,14 @@ function doctorMsg(a, h) {
   if (a.platform) {
     const p = (h.platforms || []).find(x => x.id === a.platform) || ps[0];
     if (!p) return `${PN[a.platform] || a.platform}：体检完成`;
-    if (p.state === 'ok') return `${PN[p.id]}：已登录`;
-    if (p.state === 'out') return `${PN[p.id]}：未登录${p.reason ? ' · ' + p.reason : ''}`;
-    return `${PN[p.id]}：还没检查到状态`;
+    if (p.state === 'ok') return `${p.name || PN[p.id] || p.id}：已登录`;
+    if (p.state === 'out') return `${p.name || PN[p.id] || p.id}：未登录${p.reason ? ' · ' + p.reason : ''}`;
+    return `${p.name || PN[p.id] || p.id}：还没检查到状态`;
   }
   const ok = ps.filter(p => p.state === 'ok'), bad = ps.filter(p => p.state && p.state !== 'ok');
   if (!ps.length) return '体检完成';
   if (!bad.length) return `体检完成：${ok.length} 家全部已登录`;
-  return `体检完成：${ok.length} 家正常，${bad.length} 家掉线（${bad.map(p => PN[p.id]).join('、')}）`;
+  return `体检完成：${ok.length} 家正常，${bad.length} 家掉线（${bad.map(p => p.name || PN[p.id] || p.id).join('、')}）`;
 }
 function noteDoctorDone(h) {
   const docs = (O.actions || []).filter(x => x.type === 'doctor' && x.done && x.endedAt);
@@ -51,14 +52,46 @@ const gainN = (p, n) => { const t = dayStr(new Date()), b = dayStr(new Date(Date
 const latest = (p) => { const d = Object.keys(F[p] || {}).sort(); return d.length ? { day: d[d.length - 1], total: F[p][d[d.length - 1]], n: d.length } : null; };
 const M = (e, p) => ((e.tasks.find(t => t.platform === p) || {}).m) || null;
 const busy = () => O.actions.some(a => !a.done);
-const abtn = (a, text, cls = '', cf = '') => `<button class="btn ${cls}" ${busy() && !['mark', 'login', 'toggle-platform'].includes(a.type) ? 'disabled' : ''} data-act='${esc(JSON.stringify(a))}' data-confirm="${esc(cf)}">${text}</button>`;
+const abtn = (a, text, cls = '', cf = '', label = '') => `<button type="button"${label ? ` aria-label="${esc(label)}"` : ''} class="btn ${cls}" ${busy() && !['mark', 'login', 'toggle-platform'].includes(a.type) ? 'disabled' : ''} data-act='${esc(JSON.stringify(a))}' data-confirm="${esc(cf)}">${text}</button>`;
 const tile = (lab, val, sub = '') => `<div class="panel tile"><div class="lab">${lab}</div><div class="val">${val}</div><div class="dl">${sub}</div></div>`;
 const sec = (t, note = '') => `<div class="sec"><h2>${t}</h2><span class="note">${note}</span></div>`;
-const epc = (x) => `<span class="epc">${x.covers.length ? `<img src="/cover?id=${encodeURIComponent(x.id)}&k=${x.covers.includes('4x3') ? '4x3' : x.covers[0]}" alt="">` : '<i></i>'}<span><b>${esc(x.nick)}</b><small>第 ${esc(x.episode)} 期 · ${when(x.schedule || x.createdAt).split(' ')[0]}</small></span></span>`;
+const epc = (x) => `<span class="epc">${x.covers.length ? `<img src="/cover?id=${encodeURIComponent(x.id)}&k=${x.covers.includes('4x3') ? '4x3' : x.covers[0]}&v=${x.coverVer || ''}" alt="">` : '<i></i>'}<span><b>${esc(x.nick)}</b><small>第 ${esc(x.episode)} 期 · ${when(x.schedule || x.createdAt).split(' ')[0]}</small></span></span>`;
 const samplesOf = (e) => PL.map(p => ({ name: PN[p], pts: O.samples.filter(s => s.episode_id === e.id && s.platform === p && s.views != null).map(s => [Date.parse(s.ts + ':00Z'), s.views]) })).filter(s => s.pts.length).sort((a, b) => b.pts[b.pts.length - 1][1] - a.pts[a.pts.length - 1][1]);
 let after = () => {};
+let trafficPage = 0, trafficSource = 'projects', accountTraffic = null, trafficRequest = 0;
 
 function vTraffic() {
+  const hasAccounts = accountTraffic?.statuses?.length;
+  const hasProjects = O.episodes.some(e => e.views > 1);
+  const sources = hasAccounts && hasProjects ? `<div class="btns traffic-switch"><button type="button" class="btn" data-traffic-source="projects" aria-pressed="${trafficSource === 'projects'}">发布工程</button><button type="button" class="btn" data-traffic-source="account" aria-pressed="${trafficSource === 'account'}">账号作品</button></div>` : '';
+  if (hasAccounts && (trafficSource === 'account' || !hasProjects)) return sources + vAccountTraffic();
+  return sources + vProjectTraffic() + (accountTraffic?.error ? `<p class="note" role="status">账号流量暂不可用：${esc(accountTraffic.error)}</p>` : '');
+}
+
+function vAccountTraffic() {
+  const { accounts, videos, statuses, history, direct } = accountTraffic;
+  const name = id => accounts.find(a => a.id === id)?.name || id;
+  const platform = id => accounts.find(a => a.id === id)?.platform || id;
+  const pageCount = Math.max(1, Math.ceil(videos.length / 50));
+  trafficPage = Math.min(trafficPage, pageCount - 1);
+  const rows = videos.slice(trafficPage * 50, (trafficPage + 1) * 50);
+  const total = key => statuses.every(r => r.syncedAt) && videos.every(v => v[key] != null) ? sum(videos, key) : null;
+  const lines = accounts.map(({ id, platform, name }) => ({ platform, name, pts: history.filter(h => h.platform === id && h.views != null).map(h => [Date.parse(h.day + 'T12:00:00+08:00'), h.views]) })).filter(s => s.pts.length > 1);
+  after = () => { const el = $('#account-lines'); if (el) drawLines(el, lines); };
+  const button = (action, label, css = '') => `<button type="button" class="btn ${css}" data-account-action='${esc(JSON.stringify(action))}' ${action.type === 'metricsAccounts' && busy() ? 'disabled' : ''}>${esc(label)}</button>`;
+  const running = O.actions.some(a => a.type === 'metricsAccounts' && !a.done);
+  const last = O.actions.find(a => a.type === 'metricsAccounts' && a.done);
+  return `<div class="h1">流量</div><p class="lead">已发布的账号作品，与发布工程分开。失败时保留上次成功数据。</p>
+  <div class="btns traffic-switch">${button({type:'metricsAccounts'}, running ? '采集中…' : '采集账号流量', 'pri')}${abtn({type:'followers'}, '采集粉丝')}${last && !last.ok ? `<span role="status">${esc(last.tail.trim().split('\n').at(-1) || '采集失败')}</span>` : ''}</div>
+  <div class="grid g3">${tile('作品',fmt(videos.length))}${tile('累计播放',fmt(total('views')))}${tile('累计点赞',fmt(total('likes')))}</div>
+  ${sec('账号')}<div class="panel"><div class="tw"><table><thead><tr><th>账号</th><th class="n">作品</th><th>上次成功</th><th>采集结果</th><th></th></tr></thead><tbody>${statuses.map(st => `<tr><td>${logo(platform(st.id))}${esc(name(st.id))}</td><td class="n">${fmt(st.count)}</td><td>${when(st.syncedAt) || '未采集'}</td><td role="status">${esc(st.error || (st.syncedAt ? '已采集' : '未采集'))}</td><td>${direct && st.id.startsWith('bilibili@') ? button({ type:'metricsLogin', id:st.id }, '打开登录页') : ''}</td></tr>`).join('')}</tbody></table></div></div>
+  ${sec('作品')}<div class="panel"><div class="tw"><table><thead><tr><th>作品</th><th>账号</th><th>发布</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th></tr></thead><tbody>${rows.map(v => `<tr><td>${safeUrl(v.url) ? `<a href="${safeUrl(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a>` : esc(v.title)}</td><td>${esc(name(v.platform))}</td><td>${when(v.publishedAt).split(' ')[0] || '–'}</td>${['views','likes','comments','favorites','shares'].map(k => `<td class="n">${fmt(v[k])}</td>`).join('')}</tr>`).join('') || '<tr><td colspan="8">还没有作品数据。</td></tr>'}</tbody></table></div></div>
+  ${pageCount > 1 ? `<div class="btns traffic-switch"><button type="button" class="btn" data-traffic-page="${trafficPage-1}" ${trafficPage === 0 ? 'disabled' : ''}>上一页</button><span>${trafficPage+1} / ${pageCount}</span><button type="button" class="btn" data-traffic-page="${trafficPage+1}" ${trafficPage === pageCount-1 ? 'disabled' : ''}>下一页</button></div>` : ''}
+  ${lines.length ? `${sec('累计播放走势')}<div class="panel"><div class="chartbox" id="account-lines"></div></div>` : ''}
+  ${sec('粉丝', '每天采一次')}<div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th class="n">现在</th><th class="n">今日</th><th class="n">近 7 天</th><th class="n">近 30 天</th></tr></thead><tbody>${PL.map(p => { const l = latest(p); return l ? `<tr><td>${logo(p)}${esc(PN[p])}</td><td class="n"><b>${fmt(l.total)}</b></td>${[1,7,30].map(n => `<td class="n">${gainN(p,n) == null ? '–' : sgn(gainN(p,n))}</td>`).join('')}</tr>` : ''; }).join('')}</tbody></table></div></div>`;
+}
+
+function vProjectTraffic() {
   const eps = O.episodes.filter(e => e.views > 1); if (!eps.length) return `<div class="h1">流量</div><p class="lead">还没采到流量。</p>${abtn({ type: 'metrics' }, '现在采一次', 'pri')}`;
   const all = sum(eps, 'views'), it = sum(eps, 'inter'), byP = PL.map(p => ({ p, v: eps.reduce((s, e) => s + ((M(e, p) || {}).views || 0), 0) })).sort((a, b) => b.v - a.v);
   const e = eps.find(x => x.id === pick) || eps[0], rows = PL.map(p => ({ p, m: M(e, p), t: e.tasks.find(t => t.platform === p) })).filter(r => r.m), mx = Math.max(...rows.map(r => r.m.views || 0), 1);
@@ -79,6 +112,7 @@ function vTraffic() {
 }
 
 function vConvert() {
+  if (O.siteSalesOnly) return vSales();
   if (!O.siteOn) return `<div class="h1">转化</div><p class="lead">还没接你自己的站点。</p>
   <div class="panel" style="padding:18px 20px;line-height:1.8;font-size:14px;color:var(--t2)">
     <p style="margin:0 0 10px">有课程站、会员站或者自己的产品，就能在这里看到：哪一期、哪个平台带来了注册和付费，每期一条「播放 → 注册 → 会员 → 收入」的漏斗。</p>
@@ -105,24 +139,81 @@ function vConvert() {
   <div class="btns" style="margin-top:18px">${abtn({ type: 'board' }, `现在同步${esc(PN.zsz)}数据`)}</div>`;
 }
 
+const salesMoney = n => n == null ? '–' : '¥' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const salesTotal = (rows, key) => rows.length && rows.every(r => r[key] != null && Number.isFinite(r[key])) ? rows.reduce((n, r) => n + Math.round(r[key] * 100), 0) / 100 : null;
+function vSales() {
+  const s = O.site.sales;
+  if (!s) return vSalesLegacy();
+  const trend = s.trend || [], sync = abtn({ type: 'board' }, `同步${esc(PN.zsz)}数据`, 'pri');
+  after = () => {
+    drawCols($('#c-sales-revenue'), trend.map(r => ({ x: r.day.slice(5), y: r.revenue })), '¥');
+    drawCols($('#c-sales-orders'), trend.map(r => ({ x: r.day.slice(5), y: r.orders })));
+  };
+  return `<div class="sales-page-title"><div class="h1">${esc(PN.zsz)}销售</div><time>${esc(s.today)} · 更新 ${esc(salesUpdated(s.syncedAt))}</time>${sync}</div>
+  <div class="panel sales-summary">${salesPeriods(s)}</div>${s.error ? `<p class="sales-error" role="status">${esc(s.error)}</p>` : ''}
+  <div class="grid g2 sales-page-charts"><div class="panel"><div class="ph"><h3>近 30 天支付金额</h3></div><div class="chartbox" id="c-sales-revenue" role="img" aria-label="近 30 天支付金额趋势"></div></div><div class="panel"><div class="ph"><h3>近 30 天支付订单</h3></div><div class="chartbox" id="c-sales-orders" role="img" aria-label="近 30 天支付订单趋势"></div></div></div>
+  ${sec('订单动态', `更新 ${esc(salesUpdated(s.ordersSyncedAt))}`)}<div class="panel sales-activity sales-activity-full">${salesOrders(s, 10)}</div>
+  ${sec('每日销售')}<div class="panel"><div class="tw"><table aria-label="每日销售数据"><thead><tr><th scope="col">日期</th><th scope="col" class="n">支付订单</th><th scope="col" class="n">支付金额</th><th scope="col" class="n">退款金额</th><th scope="col" class="n">支付净额</th></tr></thead><tbody>${[...trend].reverse().map(r => `<tr><td>${esc(r.day)}${r.provisional ? '<small>进行中</small>' : ''}</td><td class="n">${fmt(r.orders)}</td><td class="n">${salesMoney(r.revenue)}</td><td class="n">${salesMoney(r.refund)}</td><td class="n">${salesMoney(r.revenue != null && r.refund != null ? Math.round((r.revenue - r.refund) * 100) / 100 : null)}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function vSalesLegacy() {
+  const d = O.site.days, title = `<div class="h1">${esc(PN.zsz)}销售</div>`;
+  const sync = abtn({ type: 'board' }, `同步${esc(PN.zsz)}数据`, 'pri');
+  if (!d.length) return `${title}<div class="panel empty">未同步</div><div class="btns" style="margin-top:18px">${sync}${O.siteError ? `<span role="status">${esc(O.siteError)}</span>` : ''}</div>`;
+  const end = d[d.length - 1].day, start = new Date(end + 'T12:00:00'); start.setDate(start.getDate() - 6);
+  const week = d.filter(r => r.day >= dayStr(start) && r.day <= end), total = key => week.length === 7 ? salesTotal(week, key) : null;
+  const revenue = total('revenue'), refund = total('refund'), net = revenue != null && refund != null ? Math.round((revenue - refund) * 100) / 100 : null;
+  after = () => {
+    drawCols($('#c-sales-revenue'), d.filter(r => r.revenue != null).map(r => ({ x: r.day.slice(5), y: r.revenue })), '¥');
+    drawCols($('#c-sales-orders'), d.filter(r => r.orders != null).map(r => ({ x: r.day.slice(5), y: r.orders })));
+  };
+  return `${title}${sec('近 7 天', `截至 ${esc(end)}`)}
+  <div class="grid g4">${tile('支付订单', fmt(total('orders')))}${tile('支付金额', salesMoney(revenue))}${tile('退款金额', salesMoney(refund))}${tile('支付净额', salesMoney(net), '支付金额减当日退款，非结算到账')}</div>
+  <div class="grid g2" style="margin-top:var(--gap)"><div class="panel"><div class="ph"><h3>每日支付金额</h3></div><div class="chartbox" id="c-sales-revenue" role="img" aria-label="每日支付金额柱状图"></div></div>
+    <div class="panel"><div class="ph"><h3>每日支付订单</h3></div><div class="chartbox" id="c-sales-orders" role="img" aria-label="每日支付订单柱状图"></div></div></div>
+  ${sec('每日销售')}
+  <div class="panel"><div class="tw"><table aria-label="每日销售数据"><thead><tr><th scope="col">日期</th><th scope="col" class="n">支付订单</th><th scope="col" class="n">支付金额</th><th scope="col" class="n">退款金额</th><th scope="col" class="n">支付净额</th></tr></thead><tbody>
+    ${[...d].reverse().map(r => `<tr><td>${esc(r.day)}</td><td class="n">${fmt(r.orders)}</td><td class="n">${salesMoney(r.revenue)}</td><td class="n">${salesMoney(r.refund)}</td><td class="n">${salesMoney(r.revenue != null && r.refund != null ? Math.round((r.revenue - r.refund) * 100) / 100 : null)}</td></tr>`).join('')}
+  </tbody></table></div></div>
+  <div class="btns" style="margin-top:18px">${sync}${O.siteError ? `<span role="status">${esc(O.siteError)}</span>` : ''}</div>`;
+}
+
 function vCalendar() {
   // 日历：上周、这周、下两周，每天列出这天发的期（已发布 / 已定时 / 等你点 / 计划中）
   const DAY = 864e5, now = new Date(), dow = (now.getDay() + 6) % 7, mon0 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow - 7);
   const days = Array.from({ length: 28 }, (_, i) => new Date(mon0.getTime() + i * DAY)), key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const st = (e) => { const s = e.tasks.map(t => t.state); return s.some(x => ['failed', 'not_logged_in'].includes(x)) ? ['bad', '异常'] : s.some(x => ['awaiting_user', 'filled'].includes(x)) ? ['todo', '等你点发布'] : s.every(x => x === 'published' || x === 'skipped') ? ['ok', '已发布'] : s.some(x => x === 'planned') ? ['plan', '计划中'] : ['sch', '已定时']; };
-  const by = {}; for (const e of O.episodes) { const d = new Date(e.schedule || e.createdAt); (by[key(d)] ||= []).push(e); }
-  const today = key(now), upcoming = O.episodes.filter(e => e.schedule && Date.parse(e.schedule) > Date.now()).length;
+  // 还在等你点发布的平台（比如公众号单独发的那一家）不跟着整期走，单独落在今天，所以期卡片只统计其余平台
+  const PEND = ['awaiting_user', 'filled'];
+  const st = (e) => { const live = e.tasks.filter(t => !PEND.includes(t.state)), s = live.map(t => t.state), todoN = e.tasks.length - live.length; if (!live.length) return ['todo', '等你点发布']; return s.some(x => ['failed', 'not_logged_in'].includes(x)) ? ['bad', '异常'] : s.every(x => x === 'published' || x === 'skipped') ? (todoN ? ['ok', `已发 ${s.filter(x => x === 'published').length}/${e.tasks.length} 家`] : ['ok', '已发布']) : s.some(x => x === 'published') ? ['ok', '已发 · 部分待发'] : s.some(x => x === 'planned') ? ['plan', '计划中'] : ['sch', '已定时']; };
+  const today = key(now);
+  const by = {}; for (const e of O.episodes) { const d = new Date(e.publishAt || e.schedule || e.createdAt); (by[key(d)] ||= []).push(e); }
+  // 平台级落格：等发布的放今天；已发布但不在期锚点那天的平台（比如公众号隔天单独发），按它自己的发布时间单独落一天
+  const whenMs = (s) => { if (!s) return NaN; const x = String(s).replace(' ', 'T'); return Date.parse(x); };
+  for (const e of O.episodes) {
+    const aK = key(new Date(e.publishAt || e.schedule || e.createdAt));
+    for (const t of e.tasks) {
+      const ms = whenMs(t.publishedAt);
+      if (PEND.includes(t.state)) { (by[today] ||= []).push({ ...e, __solo: t }); continue; }
+      if (t.state === 'published' && Number.isFinite(ms)) { const k = key(new Date(ms)); if (k !== aK) (by[k] ||= []).push({ ...e, __solo: t }); }
+    }
+  }
+  const upcoming = O.episodes.filter(e => e.schedule && Date.parse(e.schedule) > Date.now()).length;
   return `<div class="h1">日历</div><p class="lead">上周到未来两周的分发安排。${upcoming ? `接下来还有 <b>${upcoming}</b> 期要发。` : '接下来没有排期，可以用 <code>hub plan</code> 把下一期放进来。'}</p>
   <div class="panel cal"><div class="cal-h">${'一二三四五六日'.split('').map(x => `<div>周${x}</div>`).join('')}</div><div class="cal-g">${days.map(d => { const k = key(d), list = by[k] || [];
     return `<div class="cal-d${k === today ? ' today' : ''}${d < new Date(now.getFullYear(), now.getMonth(), now.getDate()) ? ' past' : ''}"><div class="cal-n">${d.getDate() === 1 || d === days[0] ? `${d.getMonth() + 1}/` : ''}${d.getDate()}${k === today ? '<span>今天</span>' : ''}</div>
-      ${list.map(e => { const [c, t] = st(e), at = new Date(e.schedule || e.createdAt); return `<a class="cal-e ${c}" href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)}">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('3x4') ? '3x4' : e.covers[0]}" alt="">` : ''}<div><b>${esc(e.nick)}</b><span><i></i>${pad(at.getHours())}:${pad(at.getMinutes())} · ${t}${e.views > 1 ? ' · ' + fmt(e.views) : ''}</span></div></a>`; }).join('')}</div>`; }).join('')}</div></div>
+      ${list.map(e => { const img = e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('3x4') ? '3x4' : e.covers[0]}&v=${e.coverVer || ''}" alt="">` : ''; if (e.__solo) { const sv = e.__solo, pend = PEND.includes(sv.state), ms = whenMs(sv.publishedAt), at = Number.isFinite(ms) ? new Date(ms) : null, label = pend ? sv.name : (sv.publishedTitle || sv.title || sv.name); return `<a class="cal-e ${pend ? 'todo' : 'ok'}" href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)} · ${esc(label)}">${img}<div><b>${esc(label)}</b><span><i></i>${pend ? '等你点发布' : `${esc(sv.name)} · ${at ? pad(at.getHours()) + ':' + pad(at.getMinutes()) + ' · ' : ''}已发布`}</span></div></a>`; } const [c, t] = st(e), at = new Date(e.publishAt || e.schedule || e.createdAt);
+        const pts = e.tasks.filter(x => x.state === 'published' && Number.isFinite(whenMs(x.publishedAt))).map(x => ({ p: PN[x.platform] || x.name, ms: whenMs(x.publishedAt) })).sort((a, b) => a.ms - b.ms);
+        const hm = (ms) => { const d2 = new Date(ms); return pad(d2.getHours()) + ':' + pad(d2.getMinutes()); };
+        const spanT = pts.length > 1 && hm(pts[0].ms) !== hm(pts[pts.length - 1].ms) ? hm(pts[0].ms) + '–' + hm(pts[pts.length - 1].ms) : pad(at.getHours()) + ':' + pad(at.getMinutes());
+        const tip = pts.map(x => x.p + ' ' + hm(x.ms)).join(' / ');
+        return `<a class="cal-e ${c}" href="#/ep/${encodeURIComponent(e.id)}" title="${esc(e.name)}${tip ? ' · ' + esc(tip) : ''}">${img}<div><b>${esc(e.nick)}</b><span><i></i>${spanT} · ${t}${e.views > 1 ? ' · ' + fmt(e.views) : ''}</span></div></a>`; }).join('')}</div>`; }).join('')}</div></div>
   <div class="cal-lg"><span><i class="ok"></i>已发布</span><span><i class="sch"></i>已定时</span><span><i class="todo"></i>等你点发布</span><span><i class="plan"></i>计划中</span><span><i class="bad"></i>异常</span></div>`;
 }
 function vArchive() {
   if (!O.episodes.length) return `<div class="h1">档案</div><p class="lead">还没有登记的期数。</p>`;
   return `<div class="h1">档案</div><p class="lead">每一期发了什么、发到哪、数据怎么样。</p>
-  <div class="wall">${O.episodes.map(e => `<a class="panel poster" href="#/ep/${encodeURIComponent(e.id)}"><div class="im" style="${e.covers.length ? `background-image:url('/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}')` : ''}"></div>
-    <div class="tx"><div class="ep">第 ${esc(e.episode)} 期 · ${when(e.schedule || e.createdAt)}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length} 已发布</span></div></div></a>`).join('')}</div>`;
+  <div class="wall">${O.episodes.map(e => `<a class="panel poster" href="#/ep/${encodeURIComponent(e.id)}"><div class="im" style="${e.covers.length ? `background-image:url('/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}&v=${e.coverVer || ''}')` : ''}"></div>
+    <div class="tx"><div class="ep">第 ${esc(e.episode)} 期 · ${when(e.publishAt || e.schedule || e.createdAt)}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.filter(t => t.state !== 'skipped').length} 已发布</span></div></div></a>`).join('')}</div>`;
 }
 
 async function vEpisode(id) {
@@ -130,45 +221,65 @@ async function vEpisode(id) {
   const todo = e.tasks.filter(t => ['awaiting_user', 'filled'].includes(t.state));
   after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
   return `<a class="back" href="#/archive">‹ 档案</a>
-  <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}" alt="">` : '<div></div>'}
+  <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}&v=${e.coverVer || ''}" alt="">` : '<div></div>'}
     <div><div class="eyebrow">第 ${esc(e.episode)} 期</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
       <div style="display:flex;gap:34px;flex-wrap:wrap;margin:6px 0 16px"><div><div class="lab" style="font-size:12px;color:var(--t3)">全平台播放</div><div class="val">${e.views > 1 ? fmt(e.views) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动</div><div class="val">${e.views > 1 ? fmt(e.inter) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动率</div><div class="val">${e.views > 1 ? pct(e.inter, e.views, 1) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">已发布</div><div class="val">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length}</div></div></div>
-      <dl class="kv"><dt>发布时间</dt><dd>${e.schedule ? when(e.schedule) : '立即发布'}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
+      <dl class="kv"><dt>发布时间</dt><dd>${e.publishAt ? when(e.publishAt) : e.schedule ? when(e.schedule) : '立即发布'}${e.publishAt && e.schedule ? `<span style="color:var(--t3);font-size:12px;margin-left:8px">计划 ${when(e.schedule)}</span>` : ''}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
       <div class="btns" style="margin-top:16px">${abtn({ type: 'sync', id: e.id }, '取链接、对状态', 'pri')}${abtn({ type: 'metrics', id: e.id }, '采这一期的流量')}</div></div></div>
   ${todo.length ? `${sec('等你点发布')}<div class="panel">${todo.map(t => `<div class="prow">${logo(t.platform)}<span class="n" style="width:auto;margin-right:auto">${esc(PN[t.platform] || t.name)}<span style="color:var(--t3);margin-left:10px;font-size:12px">${esc(t.detail)}</span></span>${abtn({ type: 'mark', id: e.id, platform: t.platform, state: 'published' }, '我已发布', '', `确认「${t.name}」已经发出去了？`)}</div>`).join('')}</div>` : ''}
   ${sec('各平台')}
-  <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th>状态</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th></th></tr></thead><tbody>
-    ${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => { const m = t.m || {}, u = safeUrl(t.url); return `<tr><td>${logo(t.platform)}${esc(PN[t.platform] || t.name)}</td><td>${chip(t)}</td><td class="n"><b>${fmt(m.views)}</b></td><td class="n">${fmt(m.likes)}</td><td class="n">${fmt(m.comments)}</td><td class="n">${fmt(m.favorites)}</td><td class="n">${fmt(m.shares)}</td><td class="n">${m.views ? pct(inter(m), m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : `<span style="color:var(--t3)">${esc(t.detail).slice(0, 18)}</span>`}</td></tr>`; }).join('')}</tbody></table></div></div>
-  ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
-    ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
+  <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th>状态</th><th>发布</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th></th></tr></thead><tbody>
+    ${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => { const m = t.m || {}, u = safeUrl(t.url); return `<tr><td>${logo(t.platform)}${esc(PN[t.platform] || t.name)}</td><td>${chip(t)}</td><td style="font-size:12.5px;color:var(--t3)">${t.publishedAt ? esc(String(t.publishedAt).slice(5, 16)) : '–'}</td><td class="n"><b>${fmt(m.views)}</b></td><td class="n">${fmt(m.likes)}</td><td class="n">${fmt(m.comments)}</td><td class="n">${fmt(m.favorites)}</td><td class="n">${fmt(m.shares)}</td><td class="n">${m.views ? pct(inter(m), m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : `<span style="color:var(--t3)">${esc(t.detail).slice(0, 18)}</span>`}</td></tr>`; }).join('')}</tbody></table></div></div>
+  ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn && !O.siteSalesOnly ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
+    ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn && !O.siteSalesOnly ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
   ${sec('播放走势', '每次采样一个点')}<div class="panel"><div class="chartbox" id="c-line"></div></div>
   ${sec('当时发的文案', e.snapshotAt ? `存档于 ${when(e.snapshotAt)}` : '没有存档，显示的是工程目录里现在的内容')}
   <div class="panel">${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => `<details><summary>${logo(t.platform)}<b>${esc(PN[t.platform] || t.name)}</b><span>${esc(t.copy.title || t.copy.body.slice(0, 50))}</span></summary>${t.copy.title ? `<div class="copy"><b>${esc(t.copy.title)}</b></div>` : ''}${t.copy.body ? `<div class="copy">${esc(t.copy.body)}</div>` : ''}${t.copy.tags.length ? `<div style="margin-top:8px;font-size:12.5px;color:var(--t3)">${t.copy.tags.map(x => '#' + esc(x)).join('  ')}</div>` : ''}${t.shot ? `<img class="shot" loading="lazy" src="/shot?id=${encodeURIComponent(e.id)}&p=${t.platform}" alt="提交前的页面截图">` : ''}</details>`).join('')}</div>
   ${sec('过程记录')}<div class="panel"><div class="mono">${e.logs.length ? e.logs.map(l => { let r = l.result || ''; try { const j = JSON.parse(r); r = [j.status, j.url, j.note].filter(Boolean).join('  '); } catch {} return `${when(l.ts)}  ${esc(PN[l.platform] || l.platform || '-')}  ${esc(l.action)}  ${esc(r)}`; }).join('\n') : '没有记录'}</div></div>`;
 }
 
+function settingsHTML(s) {
+  const accounts = s.bilibiliAccounts.map((a, i) => `<fieldset class="account-row" data-account data-id="${esc(a.id || '')}" data-uid="${esc(a.uid || '')}">
+    <legend class="sr-only">B站账号 ${i + 1}</legend>
+    <input class="account-name" name="accountName" aria-label="账号名称 ${i + 1}" value="${esc(a.name)}" maxlength="40" required>
+    <span class="account-uid">${a.uid ? `UID ${esc(a.uid)}` : '未绑定'}</span>
+    <label class="account-enabled"><input type="checkbox" name="accountEnabled" ${a.enabled !== false ? 'checked' : ''}>采集账号数据</label>
+    ${a.id !== 'default' ? `<button type="button" class="btn" data-remove-account="${i}" aria-label="移除账号 ${i + 1}">移除</button>` : ''}</fieldset>`).join('');
+  return `<form id="settings-form"><div class="accounts">${accounts}</div>
+    <div class="settings-footer"><button type="button" class="btn" data-add-account ${O.driver === 'plugin' ? 'disabled' : ''}>添加账号</button><button type="submit" class="btn pri">保存</button><span id="settings-message" role="status" aria-live="polite"></span></div></form>`;
+}
+function readSettings(form) {
+  return { bilibiliAccounts: [...form.querySelectorAll('[data-account]')].map(row => ({
+    id: row.dataset.id, name: row.querySelector('[name="accountName"]').value.trim(), uid: row.dataset.uid || '',
+    enabled: row.querySelector('[name="accountEnabled"]').checked,
+  })) };
+}
+
 // 集成卡片：飞书 / 知识站
+// Older servers exposed the webhook instead of a configured flag. Never render it.
 const itg = () => I || { feishu: {}, site: {} };
+const feishuConfigured = (f = itg().feishu) => !!(f.configured ?? f.webhook);
 const fsState = (f) => {
-  if (!f.webhook) return '<span class="istate idle">未配置</span>';
+  if (!feishuConfigured(f)) return '<span class="istate idle">未配置</span>';
   const t = f.lastTest;
   if (!t) return '<span class="istate idle">未测试</span>';
-  const hm = String(t.ts || '').slice(11, 16);
+  const hm = esc(String(t.ts || '').slice(11, 16));
   return t.ok ? `<span class="istate ok">✓ 已连接${hm ? ` · 上次测试 ${hm}` : ''}</span>` : `<span class="istate bad">✗ ${esc(t.error || '测试失败')}</span>`;
 };
 const siteState = (s) => {
   if (!s.enabled) return '<span class="istate idle">未启用</span>';
   const t = s.lastTest, sum = s.summary ? ` · 近 7 天注册 ${fmt(s.summary.reg)} · 收入 ¥${fmt(s.summary.revenue)}` : '';
   if (!t) return `<span class="istate idle">未测试${sum}</span>`;
-  const hm = String(t.ts || '').slice(11, 16);
+  const hm = esc(String(t.ts || '').slice(11, 16));
   return t.ok ? `<span class="istate ok">✓ 已连接${hm ? ` · 上次测试 ${hm}` : ''}${sum}</span>` : `<span class="istate bad">✗ ${esc(t.error || '测试失败')}</span>`;
 };
 // 测试连接会等专用 Chrome，期间 load/render 可能重绘；草稿保住输入，避免表单被清空
-let siteDraft = null, fsDraft = null;
+let siteDraft = null, fsDraft = null, siteOpening = false;
 function captureSiteDraft() {
-  if (!$('#site-name')) return;
+  const name = $('#site-name');
+  if (!name || name.value == null) return;
   siteDraft = {
-    name: $('#site-name').value, base: $('#site-base').value,
+    name: name.value, base: $('#site-base').value,
     adminPath: $('#site-adminPath')?.value, coursesApi: $('#site-coursesApi')?.value,
     dashboardApi: $('#site-dashboardApi')?.value, coursePath: $('#site-coursePath')?.value,
     logo: $('#site-logo')?.value ?? '',
@@ -180,8 +291,13 @@ const siteVals = () => { const s = itg().site, d = siteDraft || {}; return {
   coursesApi: d.coursesApi ?? s.coursesApi ?? '', dashboardApi: d.dashboardApi ?? s.dashboardApi ?? '',
   coursePath: d.coursePath ?? s.coursePath ?? '', logo: d.logo ?? s.logo ?? '',
 }; };
-const siteBody = () => {
+function siteFormIntegration() {
+  const current = itg();
+  return siteOpening ? { ...current, site: { ...current.site, enabled: true } } : current;
+}
+const siteBody = (itg = siteFormIntegration) => {
   const s = itg().site, v = siteVals();
+  if (s.salesOnly) return `<div class="site-off">${esc(s.shopName)} · ${s.enabled ? '已启用小鹅通销售同步' : '销售同步已停用'}</div>${s.enabled ? '<button type="button" class="btn" data-site="test">测试连接</button>' : ''}`;
   if (!s.enabled) return '<div class="site-off">未启用 · 打开后填写站点配置；停用期间转化页、建课和站点数据同步都会关闭。</div>';
   const field = (id, lab, val) => `<label class="lab" for="${id}">${lab}</label><input class="inp" id="${id}" value="${esc(val || '')}">`;
   return `<div class="istate" id="site-state">${siteState(s)}</div>
@@ -190,45 +306,89 @@ const siteBody = () => {
     ${field('site-adminPath', '后台路径', v.adminPath)}${field('site-coursesApi', '课程接口', v.coursesApi)}${field('site-dashboardApi', '仪表盘接口', v.dashboardApi)}${field('site-coursePath', '课程页路径', v.coursePath)}
   </div></details>
   ${field('site-logo', '站点图标（本机路径，可选）', v.logo)}
-  <div class="btns"><button type="button" class="btn pri" data-site="test">测试连接</button><button type="button" class="btn" data-site="save">保存</button></div>
-  <div class="fine">保存后立即生效，不用重启</div>`;
+  <div class="btns"><button type="button" class="btn pri" data-site="test">测试连接</button><button type="button" class="btn" data-site="save" aria-label="保存站点设置">保存</button></div>`;
 };
 function paintFs() {
   const el = $('#fs-state'); if (el) el.innerHTML = fsState(itg().feishu);
   const wh = $('#fs-webhook'); if (wh && fsDraft != null) wh.value = fsDraft;
-  const cb = $('#fs-login'); if (cb) { cb.checked = !!itg().feishu.login; cb.disabled = !itg().feishu.webhook; }
+  const cb = $('#fs-login'); if (cb) { cb.checked = !!itg().feishu.login; cb.disabled = !feishuConfigured(); }
 }
-function paintSiteBody() { const el = $('#site-body'); if (el) el.innerHTML = siteBody(); const on = $('#site-on'); if (on) on.checked = !!itg().site.enabled; }
+function paintSiteBody() { const el = $('#site-body'); if (el) el.innerHTML = siteBody(); const on = $('#site-on'); if (on) on.checked = !!(itg().site.enabled || siteOpening); }
 // 停用态表单没渲染，输入框不存在时回退到草稿 / 已保存的值，避免「关掉再打开」或测试后把配置清空
 const siteFields = () => { captureSiteDraft(); const s = itg().site, v = siteVals(); return { enabled: $('#site-on')?.checked ?? !!s.enabled, ...v }; };
 
+async function postJson(url, fields) {
+  const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(fields) });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result) throw new Error(result?.error || '操作失败');
+  return result;
+}
+function feishuFields() {
+  const webhook = $('#fs-webhook').value.trim();
+  return webhook ? { webhook } : {};
+}
+async function saveFeishu(login) {
+  const fields = feishuFields();
+  const previous = itg().feishu;
+  if (!('webhook' in fields) && previous.configured == null && previous.webhook) {
+    fields.webhook = previous.webhook;  // An old server interprets omission as deletion.
+  }
+  I.feishu = (await postJson('/api/integrations/feishu', { ...fields, login })).feishu;
+  fsDraft = null;
+  if ($('#fs-webhook')) $('#fs-webhook').value = '';
+  paintFs();
+}
+async function saveSite(fields) {
+  I.site = (await postJson('/api/integrations/site', fields)).site;
+  siteDraft = null;
+  siteOpening = false;
+  paintSiteBody();
+  await load();
+}
+
+function platformRow(p) {
+  const name = p.name || PN[p.id] || p.id;
+  const [style, icon, state] = p.disabled ? ['off', '–', '已停用'] : p.state === 'ok' ? ['published', '✓', '已登录'] : p.state === 'out' ? ['not_logged_in', '✕', '未登录'] : ['idle', '?', '未检查'];
+  const note = p.disabled ? '停用期间暂停体检和账号数据采集' : p.reason || (p.day ? `上次检查 ${p.day}` : '还没检查过');
+  const login = p.state === 'ok' ? '打开后台' : '去登录';
+  const toggle = p.disabled ? '启用' : '停用';
+  // An account ID is not accepted by the publisher's base-platform actions.
+  const canAct = !p.id.includes('@');
+  return `<div class="prow pl-row${p.disabled ? ' off' : ''}">${logo(p.id)}<span class="pl-name">${esc(name)}<small class="pl-sub">${esc(note)}</small></span>
+    <span class="st-chip ${style}"><i>${icon}</i>${state}</span>
+    ${p.disabled || !canAct ? '' : abtn({type:'doctor', platform:p.id}, '检查', '', '', '检查' + name) + abtn({type:'login', platform:p.id}, login, 'pl-login', '', login + ' · ' + name)}
+    ${canAct ? abtn({type:'toggle-platform', platform:p.id, on:p.disabled}, toggle, '', p.disabled ? '' : `停用${name}？`, toggle + name) : ''}</div>`;
+}
+
 function vSystem() {
-  const h = O.health, today = new Date().toLocaleDateString('zh-CN'), cur = O.episodes[0], ps = h.platforms || [];
-  const stOf = (p) => p.disabled ? ['off', '–', '已停用'] : p.state === 'ok' ? ['published', '✓', '已登录'] : p.state === 'out' ? ['not_logged_in', '✕', '未登录'] : ['idle', '?', '未检查'];
-  return `<div class="h1">系统</div><p class="lead">麦田自己的运行情况，和需要手动触发的操作。发布只能从命令行发起，这里没有上传入口。</p>
-  <div class="grid g4">${tile('守护进程', '运行中', '开机自启，崩溃自动拉起')}${tile('NAS', h.nas ? '已挂载' : '读不到', h.nas ? '工程目录可读' : '取链接和封面会失败')}${tile('专用浏览器', h.chrome ? '在线' : '没开', '各平台的登录都在这里')}${tile('平台登录', platformSummary(h), `上次体检 ${esc(h.doctorDay || '还没做')}${h.doctorDay === today ? '（今天）' : ''}`)}</div>
+  const h = O.health, today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }), cur = O.episodes?.[0], ps = h.platforms || [];
+  const dates = ps.filter(p => !p.disabled && p.day).map(p => p.day);
+  const lastCheck = dates.sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true })).at(-1);
+  return `<div class="h1">系统</div><p class="lead">麦田的运行情况与账号设置。</p>
+  <div class="grid g4">${tile('守护进程', '运行中', '开机自启，崩溃自动拉起')}${tile('NAS', h.nas ? '已挂载' : '读不到', h.nas ? '工程目录可读' : '取链接和封面会失败')}${tile('专用浏览器', h.chrome ? '在线' : '没开', '各平台的登录都在这里')}${tile('平台登录', platformSummary(h), lastCheck ? `最近检查 ${esc(lastCheck)}${lastCheck === today ? '（今天）' : ''}` : '点击「检查」可查看账号登录状态')}</div>
   ${sec('平台', '登录、体检和常用操作；扫码要人在这台电脑前')}
-  <div class="panel"><div class="btns" style="margin-bottom:4px">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}${abtn({ type: 'board' }, '同步知识站数据')}</div>
-    ${ps.map(p => { const [c, i, t] = stOf(p); return `<div class="prow pl-row${p.disabled ? ' off' : ''}">${logo(p.id)}<span class="n" style="width:auto;margin-right:auto">${PN[p.id]}<span class="pl-sub">${p.disabled ? '不体检、不发布、不采粉丝' : p.reason || (p.day ? `上次检查 ${esc(p.day)}` : '还没检查过')}</span></span><span class="st-chip ${c}"><i>${i}</i>${t}</span>${p.disabled ? '' : abtn({ type: 'doctor', platform: p.id }, '检查')}${p.disabled ? '' : abtn({ type: 'login', platform: p.id }, p.state === 'ok' ? '打开后台' : '去登录', 'pl-login')}${abtn({ type: 'toggle-platform', platform: p.id, on: p.disabled }, p.disabled ? '启用' : '停用', '', p.disabled ? '' : `停用${PN[p.id]}？停用后不再体检、发布和采粉丝`)}</div>`; }).join('') || '<div class="empty" style="height:50px">没有平台</div>'}</div>
-  ${sec('集成', '飞书通知与自己的知识站')}
+  <div class="panel"><div class="btns" style="margin-bottom:4px">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}${O.siteOn ? abtn({ type: 'board' }, `同步${esc(O.siteName || '知识站')}数据`) : ''}</div>
+    ${ps.map(platformRow).join('') || '<div class="empty">没有平台</div>'}</div>
+  ${S ? `<details id="account-settings" class="panel settings-panel" ${settingsDirty ? 'open' : ''}><summary>B站账号设置</summary>${settingsHTML(S)}</details>` : ''}
+  ${sec('集成')}
   <div class="sys-2col sys-itg">
     <div class="panel">
-      <div class="ph"><h3>飞书</h3><span class="note" id="fs-state">${fsState(itg().feishu)}</span></div>
+      <div class="ph"><h3>飞书</h3><span class="note" id="fs-state" role="status">${fsState(itg().feishu)}</span></div>
       <label class="lab" for="fs-webhook">群机器人 webhook</label>
-      <input class="inp" id="fs-webhook" type="text" value="${esc(itg().feishu.webhook || '')}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
-      <div class="btns"><button type="button" class="btn pri" data-fs="test">测试发送</button><button type="button" class="btn" data-fs="save">保存</button></div>
-      <label class="swrow"><input type="checkbox" class="switch" id="fs-login" ${itg().feishu.login ? 'checked' : ''} ${itg().feishu.webhook ? '' : 'disabled'}><span>用飞书验证码登录 <small>远程打开时推 6 位验证码，替代网页口令</small></span></label>
-      <div class="fine">保存后立即生效，不用重启</div>
+      <input class="inp" id="fs-webhook" type="password" autocomplete="off" placeholder="${feishuConfigured() ? '已配置，留空沿用原地址' : 'https://open.feishu.cn/open-apis/bot/v2/hook/…'}">
+      <div class="btns"><button type="button" class="btn pri" data-fs="test">测试发送</button><button type="button" class="btn" data-fs="save" aria-label="保存飞书设置">保存</button></div>
+      <label class="swrow"><input type="checkbox" class="switch" id="fs-login" ${itg().feishu.login ? 'checked' : ''} ${feishuConfigured() ? '' : 'disabled'}><span>用飞书验证码登录 <small>远程打开时推 6 位验证码，替代网页口令</small></span></label>
     </div>
     <div class="panel">
-      <div class="ph"><h3>知识站</h3><label class="swrow alone"><input type="checkbox" class="switch" id="site-on" ${itg().site.enabled ? 'checked' : ''}></label></div>
+      <div class="ph"><h3>知识站</h3><label class="swrow alone"><input type="checkbox" class="switch" id="site-on" aria-label="启用知识站集成" ${itg().site.enabled || siteOpening ? 'checked' : ''}></label></div>
       <div id="site-body">${siteBody()}</div>
     </div>
   </div>
+  ${O.actions?.length ? `<div class="panel system-actions"><h3>操作记录</h3>${O.actions.map(a => `<div class="prow"><span>${esc(a.label)}</span><span>${a.done ? (a.ok ? '完成' : '出错') : '进行中'}</span>${a.done && !a.ok ? `<span class="d">${esc(a.tail)}</span>` : ''}</div>`).join('')}</div>` : ''}
   <div class="sys-2col">
     <div class="panel sys-tasks">
       <div class="ph"><h3>自动任务</h3></div>
-      <div class="sys-scroll"><dl class="kv"><dt>每 5 分钟</dt><dd>检查有没有到点要取链接的期数，提醒还没点发布的平台</dd><dt>每小时</dt><dd>视频号登录保活，掉线发飞书提醒</dd><dt>每天 9 点后</dt><dd>体检一次，有平台掉线才通知（上次：${esc(h.doctorDay || '还没做')}）</dd><dt>每天 10 点后</dt><dd>采流量和粉丝，发飞书日报（上次：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时每 6 小时采一次流量</dd></dl></div>
+      <div class="sys-scroll"><dl class="kv"><dt>每 5 分钟</dt><dd>检查有没有到点要取链接的期数，提醒还没点发布的平台</dd>${Object.keys(h.login || {}).length ? '<dt>每小时</dt><dd>启用账号登录保活</dd>' : ''}<dt>每天 9 点后</dt><dd>体检一次，有平台掉线才通知（上次：${esc(h.doctorDay || '还没做')}）</dd><dt>每天 10 点后</dt><dd>采流量和粉丝，发飞书日报（上次：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时每 6 小时采一次流量</dd></dl></div>
     </div>
     <div class="panel sys-feed">
       <div class="ph"><h3>最近动态</h3></div>
@@ -237,91 +397,150 @@ function vSystem() {
   </div>`;
 }
 
-async function render() {
+async function render(forceSettingsRender = false) {
   captureSiteDraft(); captureFsDraft();
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
-  let body; try { body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)(); } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
-  app.innerHTML = topbar(O, key) + body; after();
+  if (!O || (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender)) return;
+  let body;
+  try {
+    if (key === 'system') {
+      if (!settingsDirty) {
+        const settings = await api('/api/bilibili-accounts').catch(() => null);
+        if (!settingsDirty) S = Array.isArray(settings?.bilibiliAccounts) ? settings : null;
+      }
+    }
+    body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)();
+  } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
+  if (h !== (location.hash || '#/traffic')) return;
+  if (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender) return;
+  const visibleForm = $('#settings-form');
+  if (key !== 'system' && settingsDirty && visibleForm) S = { ...S, ...readSettings(visibleForm) };
+  const accountSettingsOpen = key === 'system' && $('#account-settings')?.open;
+  app.innerHTML = topbar(O, key) + body;
+  if (accountSettingsOpen && $('#account-settings')) $('#account-settings').open = true;
+  after();
   if (fsDraft != null) { const wh = $('#fs-webhook'); if (wh) wh.value = fsDraft; }
 }
 async function load() {
-  try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
+  try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); if (!(O.health.platforms || []).some(p => p.id === 'wechat')) off.add('wechat'); PL = PL_ALL.filter(p => !off.has(p) && ((O.siteOn && !O.siteSalesOnly) || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
   catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
+  await refreshAccountTraffic();
+}
+async function refreshAccountTraffic() {
+  if (!O || (location.hash && location.hash !== '#/traffic')) return;
+  const id = ++trafficRequest;
+  const latest = await api('/api/account-traffic').catch(e => ({ error: e.message }));
+  if (id !== trafficRequest || (location.hash && location.hash !== '#/traffic')) return;
+  accountTraffic = latest;
+  await render();
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
+document.addEventListener('input', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
+document.addEventListener('change', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'settings-form') return; e.preventDefault();
+  const form = e.target, button = form.querySelector('[type="submit"]'), status = $('#settings-message'); button.disabled = true;
+  try {
+    await postJson('/api/bilibili-accounts', { action: 'replace', ...readSettings(form) });
+    settingsDirty = false;
+    await load();
+    toast('已保存');
+  } catch (err) { status.textContent = err.message; }
+  finally { button.disabled = false; }
+});
 document.addEventListener('click', async (e) => {
-  const pk = e.target.closest('[data-pick]'); if (pk) { e.preventDefault(); pick = pk.dataset.pick; render(); return; }
-  const fsb = e.target.closest('[data-fs]');
-  if (fsb) {
-    const kind = fsb.dataset.fs; fsb.disabled = true;
-    if (kind === 'test') {
-      const r = await fetch('/api/integrations/feishu/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ webhook: $('#fs-webhook').value }) }), j = await r.json().catch(() => ({}));
-      if (!r.ok) toast(j.error || '没成功');
-      else { I.feishu = { ...itg().feishu, lastTest: { ...j, ts: new Date().toISOString() } }; paintFs(); toast(j.ok ? '已发送，去飞书看看' : (j.error || '发送失败')); }
-    } else {
-      const r = await fetch('/api/integrations/feishu', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ webhook: $('#fs-webhook').value, login: $('#fs-login').checked }) }), j = await r.json().catch(() => ({}));
-      toast(r.ok ? '已保存' : (j.error || '没成功'));
-      if (r.ok) { I.feishu = j.feishu; paintFs(); }
-    }
-    fsb.disabled = false; return;
+  const ab = e.target.closest('[data-account-action]');
+  if (ab) {
+    ab.disabled = true;
+    try {
+      const r = await fetch('/api/account-traffic', { method:'POST', headers:{'content-type':'application/json'}, body:ab.dataset.accountAction });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { toast(j.error || '没成功'); return; }
+      toast('已开始，跑完会自动刷新');
+      await load(); poll();
+    } catch (err) { toast(err.message || '没成功'); }
+    finally { ab.disabled = false; }
+    return;
   }
-  const stb = e.target.closest('[data-site]');
-  if (stb) {
-    const kind = stb.dataset.site; stb.disabled = true;
-    const fields = siteFields();
-    if (kind === 'test') {
-      if (!String(fields.base || '').trim()) { toast('先填站点地址'); stb.disabled = false; return; }
-      const r = await fetch('/api/integrations/site/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(fields) }), j = await r.json().catch(() => ({}));
-      // 无论成败都保留表单：只改状态文案，不重绘输入框
-      if (!r.ok) toast(j.error || '没成功');
-      else {
-        I.site = { ...itg().site, lastTest: { ok: !!j.ok, error: j.error || '', ts: new Date().toISOString() }, ...(j.summary ? { summary: j.summary } : {}) };
-        // 表单还在就只改状态；若测试期间被 load/render 冲掉，用草稿重绘，绝不丢输入
-        if ($('#site-name')) { const el = $('#site-state'); if (el) el.innerHTML = siteState(I.site); }
-        else paintSiteBody();
-        toast(j.ok ? '连接正常' : (j.error || '连不上'));
+  const ts = e.target.closest('[data-traffic-source]'); if (ts) { trafficSource = ts.dataset.trafficSource; await render(); return; }
+  const tp = e.target.closest('[data-traffic-page]'); if (tp) { trafficPage = Math.max(0, Number(tp.dataset.trafficPage) || 0); await render(); return; }
+  const pk = e.target.closest('[data-pick]'); if (pk) { e.preventDefault(); pick = pk.dataset.pick; render(); return; }
+  const form = $('#settings-form');
+  if (form && e.target.closest('[data-add-account]')) { S = { ...S, ...readSettings(form) }; S.bilibiliAccounts.push({ id: '', name: '', uid: '', enabled: true }); settingsDirty = true; await render(true); $('#settings-form [data-account]:last-child [name="accountName"]')?.focus(); return; }
+  const rm = e.target.closest('[data-remove-account]'); if (form && rm) { S = { ...S, ...readSettings(form) }; if (S.bilibiliAccounts[+rm.dataset.removeAccount].id !== 'default') S.bilibiliAccounts.splice(+rm.dataset.removeAccount, 1); settingsDirty = true; await render(true); return; }
+  const control = e.target.closest('[data-fs]') || e.target.closest('[data-site]');
+  if (control) {
+    I ||= { feishu: {}, site: {} };
+    control.disabled = true;
+    try {
+      if (control.dataset.fs === 'test') {
+        const result = await postJson('/api/integrations/feishu/test', feishuFields());
+        I.feishu.lastTest = { ...result, ts: new Date().toISOString() };
+        paintFs();
+        toast(result.ok ? '已发送，去飞书看看' : result.error || '发送失败');
+      } else if (control.dataset.fs === 'save') {
+        await saveFeishu($('#fs-login').checked);
+        toast('已保存');
+      } else {
+        const fields = siteFields();
+        if (control.dataset.site === 'save' && fields.enabled && !fields.base.trim()) throw new Error('先填站点地址');
+        if (control.dataset.site === 'test') {
+          const result = await postJson('/api/integrations/site/test', fields);
+          I.site.lastTest = { ok: result.ok, error: result.error, ts: new Date().toISOString() };
+          if (result.summary) I.site.summary = result.summary;
+          const state = $('#site-state');
+          if (state) state.innerHTML = siteState(I.site);
+          toast(result.ok ? '连接正常' : result.error || '连不上');
+        } else {
+          await saveSite(fields);
+          toast('已保存');
+        }
       }
-    } else {
-      if (fields.enabled && !String(fields.base || '').trim()) { toast('先填站点地址再启用'); stb.disabled = false; return; }
-      const r = await fetch('/api/integrations/site', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(fields) }), j = await r.json().catch(() => ({}));
-      toast(r.ok ? '已保存' : (j.error || '没成功'));
-      if (r.ok) { siteDraft = null; I.site = j.site; paintSiteBody(); }
-    }
-    stb.disabled = false; return;
+    } catch (err) { toast(err.message); }
+    finally { control.disabled = false; }
+    return;
   }
   const b = e.target.closest('[data-act]'); if (!b) return; const a = JSON.parse(b.dataset.act);
+  if ((a.accountId || a.type === 'toggle-platform') && settingsDirty) { toast('先保存账号设置'); return; }
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
-  if (a.type === 'toggle-platform') {
-    const r = await fetch('/api/platform-toggle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: a.platform, on: a.on }) }), j = await r.json().catch(() => ({}));
-    toast(r.ok ? (a.on ? '已启用' : '已停用') : (j.error || '没成功')); if (r.ok) await load(); return;
-  }
-  const r = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(a) }), j = await r.json().catch(() => ({}));
-  if (!r.ok) { toast(j.error || '没成功'); return; }
-  toast(a.type === 'doctor' ? (a.platform ? `开始检查${PN[a.platform] || a.platform}…` : '开始全部检查…') : '已开始，跑完会自动刷新');
-  await load(); poll();
+  b.disabled = true;
+  try {
+    if (a.type === 'toggle-platform') {
+      await postJson('/api/platform-toggle', { platform: a.platform, on: a.on });
+      toast(a.on ? '已启用' : '已停用');
+      await load();
+      return;
+    }
+    await postJson('/api/action', a);
+    toast(a.type === 'doctor' ? (a.platform ? `开始检查${PN[a.platform] || a.platform}…` : '开始全部检查…') : '已开始，跑完会自动刷新');
+    await load(); poll();
+  } catch (err) { toast(err.message); }
+  finally { b.disabled = false; }
 });
 document.addEventListener('change', async (e) => {
-  if (e.target.id === 'fs-login' && I) {
-    const r = await fetch('/api/integrations/feishu', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ webhook: $('#fs-webhook').value, login: e.target.checked }) }), j = await r.json().catch(() => ({}));
-    if (r.ok) { I.feishu = j.feishu; paintFs(); toast(j.feishu.login ? '已开启验证码登录' : '已关闭验证码登录'); }
-    else { toast(j.error || '没成功'); paintFs(); }
+  if (!I || !['fs-login', 'site-on'].includes(e.target.id)) return;
+  if (e.target.id === 'fs-login') {
+    e.target.disabled = true;
+    try { await saveFeishu(e.target.checked); toast(I.feishu.login ? '已开启验证码登录' : '已关闭验证码登录'); }
+    catch (err) { toast(err.message); paintFs(); }
     return;
   }
-  if (e.target.id !== 'site-on' || !I) return;
-  const wantOn = e.target.checked;
-  // 打开开关但还没地址：只展开表单，不落盘；填好地址后点「保存」才真正启用
-  if (wantOn && !String(siteFields().base || '').trim()) {
-    I.site = { ...itg().site, enabled: true };
+  const enabled = e.target.checked;
+  if (!I.site.base && (enabled || siteOpening)) {
+    siteOpening = enabled;
+    captureSiteDraft();
     paintSiteBody();
-    toast('先填站点地址再保存启用');
+    if (enabled) $('#site-base')?.focus();
     return;
   }
-  const fields = siteFields();
-  const r = await fetch('/api/integrations/site', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(fields) }), j = await r.json().catch(() => ({}));
-  if (r.ok) { I.site = j.site; paintSiteBody(); toast(j.site.enabled ? '已启用' : '已停用'); }
-  else { toast(j.error || '没成功'); e.target.checked = !!itg().site.enabled; paintSiteBody(); }
+  e.target.disabled = true;
+  try {
+    await saveSite({ enabled });
+    toast(enabled ? '已启用' : '已停用');
+  } catch (err) { toast(err.message); e.target.checked = I.site.enabled; }
+  finally { e.target.disabled = false; }
 });
-addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
+addEventListener('hashchange', () => { if (!location.hash || location.hash === '#/traffic') load(); else render(); scrollTo(0, 0); });
 addEventListener('resize', () => after());
 load(); setInterval(() => { if (!timer && !document.hidden && !document.querySelector('details[open]')) load(); }, 60000);
 </script>

@@ -22,10 +22,11 @@
 | 贡献 | 作者 | 状态 |
 |---|---|---|
 | Windows 上跑通整条链路（封面识别、校验、本地扩展加载） | [@BlitheBright](https://github.com/BlitheBright) | 已合入 #46 |
-| 公众号可选平台、各平台真实发布时间、大屏改版 | [@BlitheBright](https://github.com/BlitheBright) | 审核中 #49 #50 #51 |
-| B站多账号、按账号采集已有作品流量 | [@MrDanielChen](https://github.com/MrDanielChen) | 审核中 #52 #53 #54 |
-| 小鹅通只读销售同步与看板 | [@MrDanielChen](https://github.com/MrDanielChen) | 审核中 #39 |
+| 公众号可选平台、各平台真实发布时间、大屏改版 | [@BlitheBright](https://github.com/BlitheBright) | 已合入 #49 #50 #51 |
+| B站多账号、按账号采集已有作品流量 | [@MrDanielChen](https://github.com/MrDanielChen) | 已合入 #52 #53 #54 |
+| 小鹅通只读销售同步与看板 | [@MrDanielChen](https://github.com/MrDanielChen) | 已合入 #39 |
 | Windows 一键安装脚本与双击启动器 | [@ajin558](https://github.com/ajin558) | 已合入 #16 |
 | 系统页平台账号管理、Agent 一键安装指引 | [@ymstar](https://github.com/ymstar) | 已合入 #36 #31 |
+| 常见问题 FAQ（认领新手任务 #60） | [@ayam04](https://github.com/ayam04) | 已合入 #62 |
 
 想给麦田接一个新平台？看 [CONTRIBUTING.md](CONTRIBUTING.md)。

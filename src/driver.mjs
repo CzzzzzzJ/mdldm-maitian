@@ -81,3 +81,21 @@ export async function screenshot(tabId) {
   const r = mode === 'plugin' ? await bridge.call({ op: 'cdp', tabId, method: 'Page.captureScreenshot', params }) : await (await load()).cdp.send(tabId, 'Page.captureScreenshot', params);
   return Buffer.from(r.data, 'base64');
 }
+
+// Scope only account traffic to a second Chrome; normal publishing keeps its
+// existing driver and profile. Explicitly start Chrome even for a cold daemon.
+export async function withTrafficBrowser(target, fn) {
+  if (mode === 'plugin') {
+    if (target.accountId && target.accountId !== 'default') throw new Error('B站多账号需要 direct 模式');
+    await ensure();
+    return fn();
+  }
+  const shim = await import('./chrome-shim.mjs');
+  return shim.withBrowser(target, async () => { await ensure(); return fn(); });
+}
+
+export async function openTrafficLogin(target) {
+  if (mode === 'plugin') throw new Error('账号流量登录请使用 direct 模式，或在现有发布助手浏览器中登录');
+  const shim = await import('./chrome-shim.mjs');
+  return shim.withBrowser(target, () => openForLogin(['https://member.bilibili.com/']));
+}

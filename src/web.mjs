@@ -2,9 +2,10 @@
 import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
-import { SITE, siteOn, refreshSite } from './site.mjs';
+import { SITE, siteOn, refreshSite, matchesSiteData } from './site.mjs';
 import { applyFeishuPatch, applySitePatch, saveConfig, testSite } from './config-admin.mjs';
 import { learnOn, learnUrl } from './learn.mjs';
+import { buildSalesSummary, salesDateRange } from './sales.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
@@ -18,9 +19,9 @@ const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
-const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'kuaishou', 'youtube', 'x', 'instagram'];   // 知识站不是平台账号，不在这里
+const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'kuaishou', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
-const platformList = () => PLATFORMS.map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
+const platformList = () => PLATFORMS.filter(id => id !== 'zsz' || !SITE?.salesOnly).map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
 
 function episodeView(ep, full = false) {
   const snap = getSnapshot(ep.id), pj = (snap && JSON.parse(snap.project)) || readPj(ep.dir) || { platforms: {} };
@@ -31,10 +32,40 @@ function episodeView(ep, full = false) {
     const p = pj.platforms[t.platform] || {};
     return { platform: t.platform, name: NAMES[t.platform] || t.platform, state: t.state, stateCn: STATE_CN[t.state] || t.state, detail: t.detail || '', url: t.url || '', updatedAt: t.updated_at,
       m: m && { day: m.day, views: m.views, likes: m.likes, comments: m.comments, favorites: m.favorites, shares: m.shares, extra: JSON.parse(m.extra || '{}') },
+      publishedAt: t.published_at || p.published_at || '', publishedTitle: t.published_title || p.published_title || '',
       ...(full ? { copy: { title: p.title || p.shortTitle || '', body: p.desc || p.body || p.text || p.description || '', tags: p.tags || p.topics || [], covers: p.covers || [] }, shot: fs.existsSync(path.join(ep.dir, '发布档案', `${t.platform}.jpg`)) } : {}) };
   });
-  const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, createdAt: ep.created_at, dir: ep.dir,
-    campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers: Object.keys(pj.covers || {}), durationSec: pj.durationSec || 0, tasks, views, inter };
+  // 封面缓存版本号：封面文件被替换（同 URL、新内容）时改 v，避免浏览器继续用旧的占位图
+  const covers = Object.keys(pj.covers || {});
+  let coverMtime = 0, coverSize = 0;
+  for (const k of covers) { try { const s = fs.statSync(path.join(ep.dir, pj.covers[k])); coverMtime = Math.max(coverMtime, Math.round(s.mtimeMs)); coverSize += s.size; } catch {} }
+  const coverVer = coverMtime ? Math.round(coverMtime / 1000).toString(36) + '-' + coverSize.toString(36) : '';
+  // 实际发布时间：取各平台 published_at 里最早的一个（北京时间），没有就退回计划时间。
+  // 视频号可能提前单独发布；保留平台原时间，整期优先按主平台定位。
+  // 它的时间照实记在 platforms.channels.published_at 里，但不参与这个锚点，否则整期会回退到前一天。
+  const MAIN_PLAT = ['douyin', 'bilibili', 'xhs', 'youtube', 'x', 'instagram', 'zsz'];
+  const when = (raw) => {
+    if (!raw) return NaN;
+    const s = String(raw);
+    const x = s.replace(' ', 'T');
+    return Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(x) ? x : x + (x.length === 16 ? ':00+08:00' : '+08:00'));
+  };
+  // 扩展平台可能隔天单独发布，不改变已有主平台的日期锚点。
+  // 否则整期会被拖到公众号那天，日历上就看不见四家真正发布的那一天。
+  const ANCHOR_PLAT = new Set([...MAIN_PLAT, 'channels']);
+  let firstPublish = 0, anyPublish = 0;
+  for (const [pid, p] of Object.entries(pj.platforms || {})) {
+    if (p.skip) continue;
+    const t = when((tasks.find(t => t.platform === pid) || {}).publishedAt || p.published_at);
+    if (!Number.isFinite(t)) continue;
+    if (ANCHOR_PLAT.has(pid) && (!anyPublish || t < anyPublish)) anyPublish = t;   // 兜底：只有视频号发过也照样定位
+    if (MAIN_PLAT.includes(pid) && (!firstPublish || t < firstPublish)) firstPublish = t;
+  }
+  const fallback = Object.entries(pj.platforms || {}).filter(([, p]) => !p.skip).map(([, p]) => when(p.published_at)).filter(Number.isFinite);
+  const publishMs = firstPublish || anyPublish || (fallback.length ? Math.min(...fallback) : 0);
+  const publishAt = publishMs ? new Date(publishMs).toISOString() : '';
+  const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, publishAt, createdAt: ep.created_at, dir: ep.dir,
+    campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers, coverVer, durationSec: pj.durationSec || 0, tasks, views, inter };
   if (full) {
     out.logs = recentLogs(ep.id, 200);
     out.metrics = db.prepare('SELECT day, platform, views, likes, comments, favorites, shares FROM metrics WHERE episode_id=? ORDER BY day').all(ep.id);
@@ -78,11 +109,15 @@ function widgetData() {
   const now = Date.now();
   const pub = latestPublished();
   const ev = pub && episodeView(pub);
-  const days = SITE ? db.prepare('SELECT * FROM site_daily WHERE day >= ? ORDER BY day').all(ago(today, 6)) : [];
+  const siteDay = SITE && SITE.salesOnly ? db.prepare('SELECT MAX(day) day FROM site_daily').get().day || today : today;
+  const days = matchesSiteData(getMeta('siteShopName')) ? db.prepare('SELECT * FROM site_daily WHERE day >= ? AND day <= ? ORDER BY day').all(ago(siteDay, 6), siteDay) : [];
   const zsz = stat('zsz');
+  const salesTotal = key => days.length === 7 && days.every(d => d[key] != null && Number.isFinite(d[key])) ? days.reduce((n, d) => n + Math.round(d[key] * 100), 0) / 100 : null;
+  const revenue = salesTotal('revenue'), refund = salesTotal('refund');
   return { name: config.name || '麦田', owner: W.owner || '', avatar: !!W.avatar, fans: { total: sum('total'), today: sum('today'), week: sum('week') }, platforms,
     latest: ev && { title: ev.short, nick: ev.nick, views: ev.views, inter: ev.inter, hours: Math.round((now - Date.parse(pub.schedule)) / 36e5) },
-    site: SITE && { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) },
+    site: SITE && (SITE.salesOnly ? { name: SITE.name, salesOnly: true, dataThrough: days.length ? siteDay : null, orders: salesTotal('orders'), revenue, refund, net: revenue != null && refund != null ? Math.round((revenue - refund) * 100) / 100 : null }
+      : { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) }),
     metricsDay: getMeta('metricsDay') || '', now: new Date().toISOString() };
 }
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -112,14 +147,14 @@ function thumb(f, w) {
 const metaJson = (k) => { const v = getMeta(k); if (!v) return null; try { return JSON.parse(v); } catch { return null; } };
 function integrations() {
   const cs = config.site || {};
-  const summary = SITE ? (() => {
+  const summary = SITE && !SITE.salesOnly && matchesSiteData(getMeta('siteShopName')) ? (() => {
     const rows = db.prepare("SELECT day, reg, revenue FROM site_daily WHERE day >= date('now','localtime','-7 day')").all();
     return { reg: rows.reduce((n, r) => n + (r.reg || 0), 0), revenue: rows.reduce((n, r) => n + (r.revenue || 0), 0) };
   })() : null;
   return {
     feishu: { webhook: config.feishuWebhook || '', login: W.login === 'feishu', lastTest: metaJson('integrations.feishu.lastTest') },
     site: {
-      enabled: siteOn(), name: cs.name || '', base: cs.base || '',
+      enabled: siteOn(), salesOnly: cs.provider === 'xiaoe', shopName: cs.shopName || '', name: cs.name || '', base: cs.base || '',
       adminPath: cs.adminPath || '/admin', coursesApi: cs.coursesApi || '/api/courses?admin=1',
       dashboardApi: cs.dashboardApi || '/api/admin/dashboard', coursePath: cs.coursePath || '/series/{seriesId}?courseId={id}',
       logo: cs.logo || '', lastTest: metaJson('integrations.site.lastTest'), summary,
@@ -155,6 +190,17 @@ async function handle(req, res) {
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
   }
+  if (u.pathname === '/api/bilibili-accounts') {
+    const { bilibiliAccountView, saveBilibiliAccounts, InvalidBilibiliAccounts } = await import('./config-admin.mjs');
+    if (req.method === 'GET') return send(res, 200, { bilibiliAccounts: bilibiliAccountView() });
+    if (req.method !== 'POST') return send(res, 405, { error: '请求方法不支持' }, undefined, { allow: 'GET, POST' });
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, { error: '请发送 JSON' });
+    const a = await readJson(req);
+    try { return send(res, 200, saveBilibiliAccounts(a)); }
+    catch (e) {
+      return e instanceof InvalidBilibiliAccounts ? send(res, 400, { error: e.message }) : send(res, 500, { error: '保存 B 站账号失败' });
+    }
+  }
   if (u.pathname.startsWith('/static/')) { const f = path.join(DIR, 'web', path.basename(u.pathname)); if (!/\.(css|js|png)$/.test(f) || !fs.existsSync(f)) return send(res, 404, ''); return send(res, 200, fs.readFileSync(f), f.endsWith('.css') ? 'text/css; charset=utf-8' : f.endsWith('.png') ? 'image/png' : 'text/javascript; charset=utf-8'); }
   if (u.pathname === '/p') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'pages.html')), 'text/html; charset=utf-8');
   if (u.pathname === '/board') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'board.html')), 'text/html; charset=utf-8');
@@ -164,11 +210,18 @@ async function handle(req, res) {
     return send(res, 200, widgetPage(widgetScript(req, 'maitian-loader.js')), 'text/html; charset=utf-8');
   }
   if (u.pathname === '/api/overview') {
-    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
+    const salesOnly = !!SITE?.salesOnly, salesNow = Date.now(), range = salesOnly && salesDateRange(salesNow);
+    const readable = matchesSiteData(getMeta('siteShopName'));
+    const siteDays = !readable ? [] : salesOnly ? db.prepare('SELECT * FROM site_daily WHERE day>=? AND day<=? ORDER BY day').all(range.start, range.today) : db.prepare('SELECT * FROM site_daily ORDER BY day').all();
+    const sales = salesOnly ? buildSalesSummary({ days: siteDays, now: salesNow,
+      orders: readable ? db.prepare('SELECT id,title,amount,status,time,kind FROM site_orders ORDER BY time DESC,id DESC LIMIT 10').all() : [],
+      syncedAt: readable && getMeta('siteLiveSyncedAt'), ordersSyncedAt: readable && getMeta('siteOrdersSyncedAt'), error: getMeta('siteError'), ordersError: getMeta('siteOrdersError') }) : null;
+    const episodeRows = episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e));
+    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
-      site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
-        campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },
-      metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all(),
+      site: { days: siteDays, channels: readable && !salesOnly ? db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all() : [],
+        campaigns: readable && !salesOnly ? db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all() : [], campaignsOn: SITE && !salesOnly && getMeta('siteCampaigns') === 'on', ...(sales && { sales }) },
+      metrics: db.prepare('SELECT day, episode_id, platform, views, likes, comments, favorites, shares FROM metrics ORDER BY day').all(),
       followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
       samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(),
       feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', platforms: platformList() }, now: new Date().toISOString() });
@@ -184,6 +237,42 @@ async function handle(req, res) {
     // 远程打开时原图（每张 ~700KB）太慢：默认给缩略图（长边 ≤ w，默认 720，JPEG），缓存在 data/thumbs；?full=1 给原图
     if (!u.searchParams.get('full') && !/\.svg$/.test(f)) { const t = thumb(f, Math.min(1600, +u.searchParams.get('w') || 720)); if (t) return send(res, 200, fs.readFileSync(t), 'image/jpeg', { 'cache-control': 'max-age=3600' }); }
     return send(res, 200, fs.readFileSync(f), /\.png$/.test(f) ? 'image/png' : /\.svg$/.test(f) ? 'image/svg+xml' : 'image/jpeg', { 'cache-control': 'max-age=300' });
+  }
+  // Account traffic stays separate from publishing and integration actions.
+  if (u.pathname === '/api/account-traffic') {
+    const { accountTargets } = await import('./account-targets.mjs');
+    let targets;
+    try { targets = accountTargets(JSON.parse(fs.readFileSync(CFG, 'utf8'))); }
+    catch { return send(res, 400, { error: '账号配置无效' }); }
+    const direct = (process.env.HUB_DRIVER || config.driver || 'direct') === 'direct';
+    if (req.method === 'GET') {
+      const { accountTrafficView } = await import('./account-traffic.mjs');
+      return send(res, 200, { ...accountTrafficView(db, targets.map(t => t.id)),
+        accounts: targets.map(({ id, platform, name, accountId }) => ({ id, platform, name, accountId })), direct });
+    }
+    if (req.method !== 'POST') return send(res, 405, { error: '不支持的请求方法' });
+    const origin = req.headers.origin;
+    const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+    if (req.headers['sec-fetch-site'] === 'cross-site' || (origin && origin !== `${protocol}://${req.headers.host}`)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+    let a;
+    try { a = await readJson(req); } catch { return send(res, 400, { error: '请求格式不对' }); }
+    if (!a || (a.type !== 'metricsAccounts' && a.type !== 'metricsLogin')) return send(res, 400, { error: '不支持的操作' });
+    const login = a.type === 'metricsLogin';
+    const target = login && targets.find(t => t.platform === 'bilibili' && t.id === a.id);
+    if (login && (!direct || !target)) return send(res, 400, { error: '请在 direct 模式选择已启用的 B站账号' });
+    if (!login && actions.some(x => !x.done && x.type !== 'mark')) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
+    const rec = { type: a.type, label: login ? `打开账号登录页 · ${target.name}` : '采集账号作品', startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+    actions.push(rec);
+    while (actions.length > 32 && actions[0].done) actions.shift();
+    const args = login ? ['metrics-login', target.id] : ['metrics-accounts'];
+    const child = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...args], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
+    const output = data => { rec.tail = (rec.tail + data).slice(-600); };
+    child.stdout.on('data', output);
+    child.stderr.on('data', output);
+    const finish = ok => { rec.done = true; rec.ok = ok; rec.endedAt = new Date().toISOString(); };
+    child.on('error', error => { output(error.message); finish(false); });
+    child.on('close', code => finish(code === 0));
+    return send(res, 200, { ok: true });
   }
   if (u.pathname === '/api/integrations' && req.method === 'GET') return send(res, 200, integrations());
   if (u.pathname === '/api/integrations/feishu' && req.method === 'POST') {
@@ -244,7 +333,7 @@ async function handle(req, res) {
       if (a.type === 'mark' && (a.state !== 'published' || !getEpisode(a.id) || !NAMES[a.platform])) return send(res, 400, { error: '状态不对' });
       // 登录不受「同一时间只跑一个」限制：掉线时正体检着也要能马上打开登录页
       if (actions.some(x => !x.done && x.type !== 'mark') && !['mark', 'login'].includes(a.type)) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
-      const rec = { type: a.type, platform: a.platform && PLATFORMS.includes(a.platform) ? a.platform : '', label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: '同步知识站数据', followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+      const rec = { type: a.type, platform: a.platform && PLATFORMS.includes(a.platform) ? a.platform : '', label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: `同步${SITE ? SITE.name : '知识站'}数据`, followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
       actions.push(rec);
       const ch = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...argv], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
       const on = (d) => { rec.tail = (rec.tail + d).slice(-600); }; ch.stdout.on('data', on); ch.stderr.on('data', on);

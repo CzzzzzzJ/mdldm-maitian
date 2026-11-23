@@ -1,6 +1,8 @@
 // 集成配置管理：飞书群机器人、自定义知识站的合并 / 保存 / 测试。
-// 只动这两块字段，写回 config.json 前备份；保存后由调用方 refreshSite() 热更新。
+// 另外提供独立的 B 站采集账号配置接口，不改发布设置。
 import fs from 'node:fs';
+import path from 'node:path';
+import { accountsOf } from './targets.mjs';
 import { config, CFG } from './feishu.mjs';
 import * as drv from './driver.mjs';
 
@@ -19,6 +21,10 @@ export function applyFeishuPatch(config, { webhook = '', login = false } = {}) {
 const SITE_DEFAULTS = { name: '知识站', adminPath: '/admin', coursesApi: '/api/courses?admin=1', dashboardApi: '/api/admin/dashboard', coursePath: '/series/{seriesId}?courseId={id}', logo: '' };
 export function applySitePatch(config, p = {}) {
   const prev = config.site || {};
+  if (prev.provider === 'xiaoe') {
+    config.site = { ...prev, enabled: p.enabled === undefined ? prev.enabled !== false : !!p.enabled };
+    return config.site;
+  }
   const pick = (key, dflt) => p[key] !== undefined && p[key] !== null ? String(p[key]) : (prev[key] !== undefined && prev[key] !== null ? String(prev[key]) : dflt);
   const site = {
     enabled: p.enabled !== undefined ? !!p.enabled : (prev.enabled !== false),
@@ -42,9 +48,67 @@ export function saveConfig(config) {
   fs.writeFileSync(CFG, JSON.stringify(config, null, 2) + '\n');
 }
 
+// ---------- B 站采集账号 ----------
+export class InvalidBilibiliAccounts extends Error {}
+const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+export function bilibiliAccountView(cfg = config) {
+  return accountsOf(cfg).filter(a => !a.removed).map(({ id, name, uid, enabled }) => ({ id, name, uid, enabled }));
+}
+
+export function replaceBilibiliAccounts(cfg, body) {
+  const fields = ['id', 'name', 'uid', 'enabled'];
+  if (!isObject(body) || body.action !== 'replace' || Object.keys(body).some(k => k !== 'action' && k !== 'bilibiliAccounts') || !Array.isArray(body.bilibiliAccounts)) throw new InvalidBilibiliAccounts('账号设置格式无效');
+  const old = cfg.bilibiliAccounts ?? [];
+  if (!Array.isArray(old)) throw new InvalidBilibiliAccounts('现有账号设置无效，请检查 config.json');
+  const previous = new Map(old.map(a => [a?.id, a]));
+  const ids = new Set();
+  const next = body.bilibiliAccounts.map(a => {
+    if (!isObject(a) || Object.keys(a).some(k => !fields.includes(k)) || typeof a.id !== 'string' || typeof a.name !== 'string' || typeof a.uid !== 'string' || typeof a.enabled !== 'boolean' || ids.has(a.id)) throw new InvalidBilibiliAccounts('B站账号字段无效或账号重复');
+    ids.add(a.id);
+    const row = { ...previous.get(a.id), id: a.id, name: a.name.trim(), uid: a.uid, enabled: a.enabled };
+    delete row.removed;
+    return row;
+  });
+  for (const a of old) {
+    if (!a || !isObject(a)) throw new InvalidBilibiliAccounts('现有账号设置无效，请检查 config.json');
+    if (!ids.has(a.id)) next.push(a.id === 'default' ? a : { ...a, removed: true });
+  }
+  try { accountsOf({ ...cfg, bilibiliAccounts: next }); }
+  catch (e) { throw new InvalidBilibiliAccounts(e.message); }
+  return next;
+}
+
+export function saveBilibiliAccounts(body) {
+  // 在写入前读取磁盘，保留所有其他设置；同步写入和换名避免同一进程
+  // 的并发请求交错，也避免写入失败留下半个 JSON。
+  const cfgPath = fs.realpathSync(CFG);
+  const disk = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  const next = replaceBilibiliAccounts(disk, body);
+  const updated = { ...disk, bilibiliAccounts: next };
+  const tmpDir = fs.mkdtempSync(path.join(path.dirname(cfgPath), '.bilibili-accounts-'));
+  const tmpFile = path.join(tmpDir, 'config.json');
+  try {
+    fs.writeFileSync(tmpFile, JSON.stringify(updated, null, 2) + '\n', { mode: fs.statSync(cfgPath).mode & 0o777 });
+    fs.renameSync(tmpFile, cfgPath);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+  config.bilibiliAccounts = next;
+  return { bilibiliAccounts: bilibiliAccountView(updated) };
+}
+
 // ---------- 测试（只读，用调用方给的字段，不写库） ----------
 const dayStr = (t) => new Date(t + 8 * 3600e3).toISOString().slice(0, 10);
 export async function testSite(fields = {}) {
+  if (config.site?.provider === 'xiaoe') {
+    try {
+      const { fetchXiaoe } = await import('./xiaoe.mjs');
+      const s = config.site;
+      await fetchXiaoe({ shopName: s.shopName, admin: s.base.replace(/\/$/, '') + (s.adminPath || '/t/merchant/index') });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
   const base = String(fields.base || '').replace(/\/$/, '');
   if (!base) return { ok: false, error: '先填站点地址' };
   const admin = base + (fields.adminPath || '/admin');
