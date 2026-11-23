@@ -33,9 +33,17 @@ export const collectors = {
     const id = idOf(url, /short-video\/([\w-]+)/);
     const text = await withTab('https://cp.kuaishou.com/article/manage/video', async (t) => {
       await sleep(4000);
-      return evaluate(t, `(()=>{const cards=[...document.querySelectorAll('a[href],article,[class*=card],[class*=item]')];
-        const c=cards.find(e=>e.innerText&&(${J(id)}&&e.href&&e.href.includes(${J(id)}))||e.innerText.includes(${J(p.title||p.body||'')}));
-        return c?c.innerText:null})()`);
+      return evaluate(t, `(()=>{const id=${J(id)}, title=${J((p && p.title) || '')}, stat=/播放|点赞|评论|分享/;
+        const links=[...document.querySelectorAll('a[href]')];
+        const a=id?links.find(e=>(e.getAttribute('href')||'').includes(id)||(e.href||'').includes(id)):null;
+        const cardOf=(el)=>{let best=el; for(let n=el;n&&n!==document.body;n=n.parentElement){const t=n.innerText||''; if(!stat.test(t)) continue;
+          const others=[...n.querySelectorAll('a[href]')].filter(x=>x!==a&&/short-video|photoId|workId/.test(x.href||'')&&!(id&&(x.href||'').includes(id)));
+          if(others.length) break; best=n;} return best;};
+        if(a) return cardOf(a).innerText||'';
+        if(!title) return null;
+        const nodes=[...document.querySelectorAll('article,[class*=card]')].filter(e=>(e.innerText||'').includes(title));
+        nodes.sort((x,y)=>x.innerText.length-y.innerText.length);
+        return nodes[0]?nodes[0].innerText:null})()`);
     }, { wait: 8000 });
     if (!text) return null;
     const get = (label) => num((text.match(new RegExp(label+'\\s*([\\d,.万亿KM]+)','i'))||[])[1]);

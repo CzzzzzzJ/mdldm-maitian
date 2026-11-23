@@ -35,7 +35,7 @@ export const followerCollectors = {
       }
       return '';
     }, { wait: 9000 });
-    const total = num(((text || '').match(/(?:粉丝数|粉丝总数|粉丝)\\s*[:：]?\\s*([\\d,.万亿KM]+)/i)||[])[1]);
+    const total = num(((text || '').match(/(?:粉丝数|粉丝总数|粉丝)\s*[:：]?\s*([\d,.万亿KM]+)/i) || [])[1]);
     return total != null && { total, history: [] };
   },
   async channels() {
@@ -89,8 +89,9 @@ export function saveFollowers(platform, r) {
 }
 export async function collectFollowers(only, skip = []) {
   const out = {}, off = new Set([...(config.disabled || []), ...skip]);
+  const optedIn = new Set((config.batches || []).flat());
   for (const [p, fn] of Object.entries(followerCollectors)) {
-    if ((p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p)) continue;
+    if ((p === 'kuaishou' && !optedIn.has('kuaishou')) || (p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p)) continue;
     try { const r = await fn(); if (!r) { out[p] = '没读到'; continue; } const n = saveFollowers(p, r); out[p] = { total: r.total, backfilled: n }; }
     catch (e) { out[p] = '出错：' + e.message.slice(0, 80); }
   }
