@@ -19,6 +19,7 @@
 <script src="/static/mt.js"></script>
 <script>
 let S = null, settingsDirty = false;
+let scheduleEditor = null;
 let O = null, I = null, F = {}, timer = null, pick = null;
 const toasted = new Set();
 let doctorPrimed = false;
@@ -360,6 +361,41 @@ function platformRow(p) {
     ${canAct ? abtn({type:'toggle-platform', platform:p.id, on:p.disabled}, toggle, '', p.disabled ? '' : `停用${name}？`, toggle + name) : ''}</div>`;
 }
 
+const scheduleNames = { sales: '小鹅通销售与订单', daemon: '守护进程检查' };
+function scheduleText(rule) {
+  return rule.mode === 'daily' ? '每天 ' + rule.times.join('、') : '每 ' + rule.minutes + ' 分钟';
+}
+function schedulePanel() {
+  const saved = itg().schedules;
+  if (!saved) return '';
+  const keys = itg().site.salesOnly ? ['sales', 'daemon'] : ['daemon'];
+  if (!scheduleEditor) return `<dl class="schedule-summary">${keys.map(key => `<div><dt>${scheduleNames[key]}</dt><dd>${esc(scheduleText(saved[key]))}</dd></div>`).join('')}</dl>
+    <button type="button" class="btn" data-edit-schedules>修改时间</button>`;
+  return `<form id="schedule-form" aria-label="自动调度">
+    <div class="grid g2">${keys.map(key => {
+      const rule = scheduleEditor.fields[key], interval = rule.mode === 'interval';
+      return `<fieldset data-schedule="${key}" class="schedule-field"><legend>${scheduleNames[key]}</legend>
+        <label class="lab" for="${key}-mode">调度方式</label>
+        <select class="inp" id="${key}-mode" name="${key}Mode"><option value="interval" ${interval ? 'selected' : ''}>按间隔</option><option value="daily" ${interval ? '' : 'selected'}>每天定点</option></select>
+        <div data-schedule-interval ${interval ? '' : 'hidden'}><label class="lab" for="${key}-minutes">间隔（分钟）</label>
+          <input class="inp" type="number" inputmode="numeric" min="1" max="1440" step="1" required id="${key}-minutes" value="${esc(rule.minutes)}" ${interval ? '' : 'disabled'}></div>
+        <div data-schedule-daily ${interval ? 'hidden' : ''}><label class="lab" for="${key}-times">每天的时间（上海时间）</label>
+          <input class="inp" id="${key}-times" type="text" required placeholder="08:00, 18:30" aria-describedby="${key}-times-hint" value="${esc(rule.times)}" ${interval ? 'disabled' : ''}>
+          <small class="note" id="${key}-times-hint">使用 24 小时制，多个时间用逗号隔开。</small></div>
+        </fieldset>`;
+    }).join('')}</div>
+    <div class="settings-footer"><button class="btn pri" type="submit">保存时间</button><button class="btn" type="button" data-cancel-schedules>取消</button>
+    <span role="status" id="schedule-message"></span></div></form>`;
+}
+function paintSchedules() {
+  const panel = $('#schedule-panel');
+  if (panel) panel.innerHTML = schedulePanel();
+}
+function readScheduleField(row) {
+  const key = row.dataset.schedule;
+  return { mode: row.querySelector('select').value, minutes: row.querySelector('#' + key + '-minutes').value, times: row.querySelector('#' + key + '-times').value };
+}
+
 function vSystem() {
   const h = O.health, today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }), cur = O.episodes?.[0], ps = h.platforms || [];
   const dates = ps.filter(p => !p.disabled && p.day).map(p => p.day);
@@ -370,6 +406,7 @@ function vSystem() {
   <div class="panel"><div class="btns" style="margin-bottom:4px">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}</div>
     ${ps.map(platformRow).join('') || '<div class="empty">没有平台</div>'}</div>
   ${S ? `<details id="account-settings" class="panel settings-panel" ${settingsDirty ? 'open' : ''}><summary>B站账号设置</summary>${settingsHTML(S)}</details>` : ''}
+  ${itg().schedules ? `${sec('自动调度', '上海时间')}<div class="panel schedule-panel" id="schedule-panel">${schedulePanel()}</div>` : ''}
   ${sec('集成')}
   <div class="sys-2col sys-itg">
     <div class="panel">
@@ -389,7 +426,7 @@ function vSystem() {
   <div class="sys-2col">
     <div class="panel sys-tasks">
       <div class="ph"><h3>自动任务</h3></div>
-      <div class="sys-scroll"><dl class="kv"><dt>每 5 分钟</dt><dd>检查有没有到点要取链接的期数，提醒还没点发布的平台</dd>${Object.keys(h.login || {}).length ? '<dt>每小时</dt><dd>启用账号登录保活</dd>' : ''}<dt>每天 9 点后</dt><dd>体检一次，有平台掉线才通知（上次：${esc(h.doctorDay || '还没做')}）</dd><dt>每天 10 点后</dt><dd>采流量和粉丝，发飞书日报（上次：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时每 6 小时采一次流量</dd></dl></div>
+      <div class="sys-scroll"><dl class="kv"><dt>守护进程检查时</dt><dd>检查到期的发布链接，提醒等待确认的平台</dd>${Object.keys(h.login || {}).length ? '<dt>登录保活</dt><dd>保活间隔到期时检查已配置的账号</dd>' : ''}<dt>每日体检</dt><dd>每天 09:00 后的首轮检查执行（已处理到：${esc(h.doctorDay || '还没做')}）</dd><dt>流量日报</dt><dd>每天 10:00 后的首轮检查采流量和粉丝（已处理到：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时内，采样间隔到期时采流量</dd></dl></div>
     </div>
     <div class="panel sys-feed">
       <div class="ph"><h3>最近动态</h3></div>
@@ -401,7 +438,8 @@ function vSystem() {
 async function render(forceSettingsRender = false) {
   captureSiteDraft(); captureFsDraft();
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
-  if (!O || (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender)) return;
+  const editingSystem = () => key === 'system' && !forceSettingsRender && ((settingsDirty && $('#settings-form')) || (scheduleEditor && $('#schedule-form')));
+  if (!O || editingSystem()) return;
   let body;
   try {
     if (key === 'system') {
@@ -413,7 +451,7 @@ async function render(forceSettingsRender = false) {
     body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)();
   } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
   if (h !== (location.hash || '#/traffic')) return;
-  if (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender) return;
+  if (editingSystem()) return;
   const visibleForm = $('#settings-form');
   if (key !== 'system' && settingsDirty && visibleForm) S = { ...S, ...readSettings(visibleForm) };
   const accountSettingsOpen = key === 'system' && $('#account-settings')?.open;
@@ -436,9 +474,35 @@ async function refreshAccountTraffic() {
   await render();
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
-document.addEventListener('input', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
+document.addEventListener('input', (e) => {
+  if (e.target.closest?.('#settings-form')) settingsDirty = true;
+  const row = e.target.closest?.('[data-schedule]');
+  if (row && scheduleEditor) scheduleEditor.fields[row.dataset.schedule] = readScheduleField(row);
+});
 document.addEventListener('change', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
 document.addEventListener('submit', async (e) => {
+  if (e.target.id === 'schedule-form') {
+    e.preventDefault();
+    const form = e.target;
+    if (!scheduleEditor || form.inert) return;
+    const schedules = { ...scheduleEditor.original };
+    for (const row of form.querySelectorAll('[data-schedule]')) {
+      const field = readScheduleField(row);
+      schedules[row.dataset.schedule] = field.mode === 'interval' ? { mode: 'interval', minutes: Number(field.minutes) }
+        : { mode: 'daily', times: field.times.trim().split(/[,，、\s]+/).filter(Boolean) };
+    }
+    form.inert = true;
+    try {
+      const saved = await postJson('/api/schedules', { schedules, expectedSchedules: scheduleEditor.original });
+      if (I) I.schedules = saved;
+      scheduleEditor = null;
+      paintSchedules();
+      $('[data-edit-schedules]')?.focus();
+      toast('已保存调度时间');
+    } catch (err) { form.querySelector('[role="status"]').textContent = err.message; }
+    finally { form.inert = false; }
+    return;
+  }
   if (e.target.id !== 'settings-form') return; e.preventDefault();
   const form = e.target, button = form.querySelector('[type="submit"]'), status = $('#settings-message'); button.disabled = true;
   try {
@@ -450,6 +514,29 @@ document.addEventListener('submit', async (e) => {
   finally { button.disabled = false; }
 });
 document.addEventListener('click', async (e) => {
+  const editSchedule = e.target.closest('[data-edit-schedules]');
+  if (editSchedule) {
+    editSchedule.disabled = true;
+    try {
+      const saved = await api('/api/schedules');
+      I.schedules = saved;
+      const fields = {};
+      for (const [key, rule] of Object.entries(saved)) {
+        fields[key] = { mode: rule.mode, minutes: String(rule.minutes ?? 60), times: (rule.times || []).join(', ') };
+      }
+      scheduleEditor = { original: saved, fields };
+      paintSchedules();
+      $('#schedule-form select')?.focus();
+    } catch (err) { toast(err.message); }
+    finally { editSchedule.disabled = false; }
+    return;
+  }
+  if (e.target.closest('[data-cancel-schedules]')) {
+    scheduleEditor = null;
+    paintSchedules();
+    $('[data-edit-schedules]')?.focus();
+    return;
+  }
   const ab = e.target.closest('[data-account-action]');
   if (ab) {
     ab.disabled = true;
@@ -519,6 +606,16 @@ document.addEventListener('click', async (e) => {
   finally { b.disabled = false; }
 });
 document.addEventListener('change', async (e) => {
+  const row = e.target.closest?.('[data-schedule]');
+  if (scheduleEditor && row && e.target.tagName === 'SELECT') {
+    const interval = e.target.value === 'interval';
+    row.querySelector('[data-schedule-interval]').hidden = !interval;
+    row.querySelector('[data-schedule-daily]').hidden = interval;
+    row.querySelector('input[type="number"]').disabled = !interval;
+    row.querySelector('input[type="text"]').disabled = interval;
+    scheduleEditor.fields[row.dataset.schedule] = readScheduleField(row);
+    return;
+  }
   if (!I || !['fs-login', 'site-on'].includes(e.target.id)) return;
   if (e.target.id === 'fs-login') {
     e.target.disabled = true;

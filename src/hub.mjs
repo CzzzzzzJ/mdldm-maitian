@@ -14,7 +14,9 @@
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import crypto from 'node:crypto'; import { execFileSync, spawn } from 'node:child_process';
 import { db, NAMES, LOCKED, STATE_CN, upsertEpisode, getTask, getTasks, setTask, log, episodes, getEpisode, recentLogs, getMeta, setMeta, saveMetric, prevMetric, saveSnapshot } from './db.mjs';
 import { collectors } from './metrics.mjs';
-import { boardSync, syncSalesIfDue } from './board.mjs';
+import { boardSync, syncScheduledSales } from './board.mjs';
+import { latestDailyDay, eveningCheckDue, linkCheckDue } from './schedules.mjs';
+import { watchSchedule, watchScheduleFile, scheduleDeadline } from './schedule-runtime.mjs';
 const board = (o) => boardSync(o).then((r) => { if (r) console.log('看板已同步：' + JSON.stringify(r)); return r; }).catch((e) => { console.error('看板同步出错：' + e.message); });
 import { config, notify } from './feishu.mjs';
 import { collectFollowers } from './followers.mjs';
@@ -331,7 +333,7 @@ async function metricsReport(list, { accounts = true } = {}) {
   // 粉丝：每天一次，和流量一起采
   const fl = await collectFollowers(null, SKIP_METRICS).catch((e) => ({ 出错: e.message }));   // --skip 的平台粉丝也不采
   const flLine = Object.entries(fl).map(([p, r]) => `${NAMES[p] || p} ${r && r.total != null ? r.total.toLocaleString('en-US') : r}`).join('｜');
-  await board();
+  await board({ cachedSales: true });
   if (parts.length) await notify(`📊 流量日报 ${today()}\n\n粉丝：${flLine}\n\n${parts.join('\n\n')}${config.board ? `\n\n看板：${config.board.url}` : ''}`);
   else console.log('没有已发布的平台可采集');
 }
@@ -415,99 +417,128 @@ function scanPlans() {
   walk(config.rootPath, 0); return out;
 }
 
-// 常驻：每 5 分钟看一眼。到了定时时间自动取链接；你还没点的平台定时提醒并检查
+// 销售同步和例行巡检各自计时；定时发布保留独立检查。
 async function daemon() {
+  watchScheduleFile();
   if (!process.env.HUB_NO_WEB && config.web) { const { startWeb } = await import('./web.mjs'); startWeb(); }
   console.log(`发布中控守护进程启动（${drv.mode}）`);
   // 开机后 NAS 往往比守护进程晚挂上：等一等，自己挂一次（密码在钥匙串里），5 分钟还不行再报警
   { let ok = false; for (let i = 0; i < 10 && !(ok = await ensureNas()); i++) await drv.sleep(30000);
     if (ok) console.log('NAS 可读'); else await notify('⚠️ 麦田守护进程启动 5 分钟后仍读不到 NAS（已尝试自动挂载），取链接和封面会失败，请检查 NAS 是否开机'); }
   const MIN = 60000, every = (key, ms) => { const last = +getMeta(key) || 0; if (Date.now() - last < ms) return false; setMeta(key, Date.now()); return true; };
-  for (;;) {
-    try {
-      await syncSalesIfDue().catch(e => console.error('小鹅通销售同步出错：' + e.message));
-      if (!(await ensureNas()) && every('nasAlert', 60 * MIN)) await notify('⚠️ 麦田读不到 NAS，已尝试自动挂载但没成功');
-      else if (every('scanPlans', 30 * MIN)) { const n = scanPlans(); if (n.length) await notify(`🗓 分发计划新增 ${n.length} 期\n${n.join('\n')}`); }
-      for (const ep of episodes()) {
-        if (Date.now() - Date.parse(ep.created_at) > 14 * 86400e3) continue;
-        const tasks = getTasks(ep.id).filter(t => canPublish(t.platform)); if (!tasks.length) continue;
-        const sched = ep.schedule ? Date.parse(ep.schedule) : 0;
-        // 知识站：到了定时前 ZSZ_LEAD 分钟自动建课；已建的课复查是否真正上线
-        const zt = tasks.find(t => t.platform === 'zsz');
-        if (SITE && zt && zt.state === 'pending' && sched && Date.now() >= sched - ZSZ_LEAD * MIN && Date.now() < sched + 6 * 60 * MIN && every(`zszrun:${ep.id}`, 20 * MIN)) {
-          log(ep.id, 'zsz', 'deferred-run', '定时前自动建课');
-          execFileSync('node', [path.join(path.dirname(new URL(import.meta.url).pathname), 'hub.mjs'), 'run', ep.dir, '--only', 'zsz'], { stdio: 'inherit', timeout: 40 * MIN });
+  // Only deferred course uploads and X articles have short publication windows.
+  const timedTasks = db.prepare(`SELECT e.*, t.platform FROM tasks t JOIN episodes e ON e.id = t.episode_id
+    WHERE e.schedule IS NOT NULL AND ((t.platform = 'zsz' AND t.state = 'pending') OR (t.platform = 'x' AND t.state = 'scheduled')) ORDER BY e.schedule`);
+  let courseWorker = null;
+  async function watchPublications() {
+    for (;;) {
+      let next = Date.now() + 5 * MIN;
+      try {
+        for (const ep of timedTasks.all()) {
+          const sched = Date.parse(ep.schedule), now = Date.now();
+          if (!Number.isFinite(sched) || DISABLED.has(ep.platform) || !canPublish(ep.platform)) continue;
+          if (ep.platform === 'zsz') {
+            if (!SITE || now - Date.parse(ep.created_at) > 14 * 86400e3 || now >= sched + 6 * 60 * MIN) continue;
+            const due = sched - ZSZ_LEAD * MIN;
+            if (now < due) { next = Math.min(next, due); continue; }
+            if (courseWorker || !every(`zszrun:${ep.id}`, 20 * MIN)) continue;
+            log(ep.id, 'zsz', 'deferred-run', '定时前自动建课');
+            courseWorker = spawn(process.execPath, [process.argv[1], 'run', ep.dir, '--only', 'zsz'], { stdio: 'inherit', timeout: 40 * MIN });
+            courseWorker.once('error', e => console.error('知识站建课出错：' + e.message));
+            courseWorker.once('close', () => { courseWorker = null; });
+          } else {
+            if (now > sched + 20 * MIN || getMeta(`xart:${ep.id}`) || !articleOn()) continue;
+            const due = sched - 25 * MIN;
+            if (now < due) { next = Math.min(next, due); continue; }
+            let pj; try { pj = loadProject(ep.dir); } catch { continue; }
+            if (pj.platforms.x?.mode !== 'article+quote') continue;
+            setMeta(`xart:${ep.id}`, now); startArticleJob(ep, pj);
+            await notify(`🕕 ${ep.name}\nX：启动长文脚本，${new Date(sched).toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)} 发长文，再发引用长文的视频帖`);
+          }
         }
-        if (SITE && zt && zt.state === 'scheduled' && every(`zszcheck:${ep.id}`, 10 * MIN)) {
-          const pj0 = loadProject(ep.dir); const cs = await zszCourses(pj0.platforms.zsz.title).catch(() => []);
-          if (cs.length === 1 && cs[0].vis === 'published') { setTask(ep.id, 'zsz', 'published', '已上线', { url: SITE.courseUrl(cs[0]) }); await notify(`✅ ${ep.name}\n知识站：已上线`); }
-        }
-        const waiting = tasks.filter(t => t.state === 'awaiting_user');
-        const unsettled = tasks.filter(t => t.state === 'scheduled' || (t.state === 'published' && !t.url && t.platform !== 'channels'));
-        if (waiting.length && every(`remind:${ep.id}`, 20 * MIN)) {
-          const changed = await sync(ep, waiting.map(t => t.platform), true).catch(() => false);
-          const still = getTasks(ep.id).filter(t => canPublish(t.platform) && t.state === 'awaiting_user');
-          if (still.length && !changed) await notify(`⏰ ${ep.name}\n还在等你点发布：${still.map(t => NAMES[t.platform]).join('、')}${sched ? `\n定时时间 ${ep.schedule.replace('T', ' ').slice(0, 16)}` : ''}`);
-        }
-        if (unsettled.length && (!sched || Date.now() > sched + 5 * MIN) && Date.now() < (sched || Date.parse(ep.created_at)) + 24 * 3600e3 && every(`sync:${ep.id}`, 30 * MIN)) {
-          await sync(ep, unsettled.map(t => t.platform), true).catch((e) => console.error('sync 出错：' + e.message));
-          const left = getTasks(ep.id).filter(t => canPublish(t.platform) && t.state === 'scheduled');
-          if (!left.length && !getMeta(`done:${ep.id}`)) { setMeta(`done:${ep.id}`, 1); await notify(`🎉 ${ep.name}\n全部平台已发布\n${table(ep.id)}`); }
-        }
-      }
-      // 新发的一期头三天加密采样（每 6 小时一次），之后回到每天一次
-      for (const ep of episodes()) {
-        const pub = Date.parse(ep.schedule || ep.created_at); if (!(Date.now() > pub + 30 * MIN && Date.now() < pub + 72 * 3600e3)) continue;
-        if (!getTasks(ep.id).some(t => t.state === 'published') || !every(`sample:${ep.id}`, (config.sampleHours || 6) * 60 * MIN)) continue;
-        await collectMetrics(ep).catch((e) => console.error('加密采样出错：' + e.message));
-      }
-      // 登录保活：定期打开一下后台首页（视频号的扫码登录过期快），掉线就提醒，并记下每次保持了多久
-      for (const id of config.keepAlive || []) {
-        if (DISABLED.has(id) || !canPublish(id)) continue;
-        if (!every(`keep:${id}`, (config.keepAliveMinutes || 60) * MIN)) continue;
-        const ok = await drv.withTab(LOGIN_PAGES[id], async (t) => !/login|passport|signin/i.test((await chrome.tabs.get(t)).url) && !(await drv.evaluate(t, `/扫码登录/.test(document.body.innerText) && /验证码登录|密码登录/.test(document.body.innerText)`).catch(() => false)), { wait: 12000 }).catch(() => null);
-        if (ok === null) continue;
-        const was = getMeta(`login:${id}`);
-        if (ok && was !== 'ok') { setMeta(`login:${id}`, 'ok'); setMeta(`loginReason:${id}`, ''); setMeta(`loginSince:${id}`, Date.now()); }
-        if (!ok && was !== 'out') {
-          const since = +getMeta(`loginSince:${id}`) || 0; setMeta(`login:${id}`, 'out');
-          // 原因直接挂到平台状态上（系统页那一行动显示），不只留在「最近动态」里
-          setMeta(`loginReason:${id}`, since ? `登录过期，这次保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时` : '登录过期，请重新扫码');
-          log('', id, 'login-expired', since ? `保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时` : '');
-          await notify(`🔑 ${NAMES[id]}登录过期了${since ? `（这次保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时）` : ''}\n发布前请在专用 Chrome 里重新扫码：${LOGIN_PAGES[id]}`);
-        }
-      }
-      // X 长文模式：定时前 25 分钟启动长文脚本（每期只启动一次）
-      for (const ep of episodes()) {
-        const sched = ep.schedule ? Date.parse(ep.schedule) : 0, xt = getTask(ep.id, 'x');
-        if (!sched || !xt || xt.state !== 'scheduled' || Date.now() < sched - 25 * MIN || Date.now() > sched + 20 * MIN || getMeta(`xart:${ep.id}`)) continue;
-        let pj; try { pj = loadProject(ep.dir); } catch { continue; }
-        if (pj.platforms.x && pj.platforms.x.mode === 'article+quote' && articleOn()) { setMeta(`xart:${ep.id}`, Date.now()); startArticleJob(ep, pj); await notify(`🕕 ${ep.name}\nX：启动长文脚本，${new Date(sched).toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)} 发长文，再发引用长文的视频帖`); }
-      }
-      // 每天上午 10 点后采一次流量（最近 30 天的期数）
-      if (new Date().getHours() >= 10 && getMeta('metricsDay') !== new Date().toLocaleDateString('zh-CN')) {
-        setMeta('metricsDay', new Date().toLocaleDateString('zh-CN'));
-        await metricsReport(episodes().filter(e => Date.now() - Date.parse(e.created_at) < 30 * 86400e3)).catch((e) => console.error('流量采集出错：' + e.message));
-        // 采完流量：到第 1/3/7 天的期出复盘卡片，周一出周报（每条只发一次）
-        try { const R = await import('./review.mjs'); for (const t of R.due((k) => { if (getMeta(k)) return false; setMeta(k, Date.now()); return true; })) await notify(t); }
-        catch (e) { console.error('复盘出错：' + e.message); }
-      }
-      // 发布前一晚 20 点后：第二天要发、还没开跑的期，先查一遍登录，掉线的今晚就扫码
-      for (const ep of episodes()) {
-        const sched = ep.schedule ? Date.parse(ep.schedule) : 0;
-        if (!sched || new Date().getHours() < 20 || sched - Date.now() < 6 * 3600e3 || sched - Date.now() > 30 * 3600e3) continue;
-        if (!getTasks(ep.id).some(t => t.state === 'planned') || getMeta(`eve:${ep.id}`)) continue;
-        setMeta(`eve:${ep.id}`, Date.now());
-        const bad = await doctor().catch(() => null);
-        if (bad && !bad.length) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，${ALL().length} 个平台登录都正常`);
-        else if (bad) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，今晚先把这些平台登录好：${bad.map(i => NAMES[i]).join('、')}`);
-      }
-      // 每天上午体检一次，有平台掉线才通知
-      const day = new Date().toLocaleDateString('zh-CN');
-      if (new Date().getHours() >= 9 && getMeta('doctorDay') !== day) { setMeta('doctorDay', day); await doctor().catch((e) => console.error('体检出错：' + e.message)); }
-    } catch (e) { console.error('守护循环出错：' + e.message); }
-    await drv.sleep(5 * MIN);
+      } catch (e) { console.error('定时发布检查出错：' + e.message); }
+      await drv.sleep(Math.max(0, next - Date.now()));
+    }
   }
+  async function checkDaemon() {
+    if (!(await ensureNas()) && every('nasAlert', 60 * MIN)) await notify('⚠️ 麦田读不到 NAS，已尝试自动挂载但没成功');
+    else if (every('scanPlans', 30 * MIN)) { const n = scanPlans(); if (n.length) await notify(`🗓 分发计划新增 ${n.length} 期\n${n.join('\n')}`); }
+    for (const ep of episodes()) {
+      if (Date.now() - Date.parse(ep.created_at) > 14 * 86400e3) continue;
+      const tasks = getTasks(ep.id).filter(t => canPublish(t.platform)); if (!tasks.length) continue;
+      const sched = ep.schedule ? Date.parse(ep.schedule) : 0;
+      // 已建的课复查是否真正上线
+      const zt = tasks.find(t => t.platform === 'zsz');
+      if (SITE && zt && zt.state === 'scheduled' && every(`zszcheck:${ep.id}`, 10 * MIN)) {
+        const pj0 = loadProject(ep.dir); const cs = await zszCourses(pj0.platforms.zsz.title).catch(() => []);
+        if (cs.length === 1 && cs[0].vis === 'published') { setTask(ep.id, 'zsz', 'published', '已上线', { url: SITE.courseUrl(cs[0]) }); await notify(`✅ ${ep.name}\n知识站：已上线`); }
+      }
+      const waiting = tasks.filter(t => t.state === 'awaiting_user');
+      const unsettled = tasks.filter(t => t.state === 'scheduled' || (t.state === 'published' && !t.url && t.platform !== 'channels'));
+      if (waiting.length && every(`remind:${ep.id}`, 20 * MIN)) {
+        const changed = await sync(ep, waiting.map(t => t.platform), true).catch(() => false);
+        const still = getTasks(ep.id).filter(t => canPublish(t.platform) && t.state === 'awaiting_user');
+        if (still.length && !changed) await notify(`⏰ ${ep.name}\n还在等你点发布：${still.map(t => NAMES[t.platform]).join('、')}${sched ? `\n定时时间 ${ep.schedule.replace('T', ' ').slice(0, 16)}` : ''}`);
+      }
+      if (unsettled.length && linkCheckDue(sched, Date.parse(ep.created_at), Number(getMeta(`sync:${ep.id}`)), Date.now()) && every(`sync:${ep.id}`, 30 * MIN)) {
+        await sync(ep, unsettled.map(t => t.platform), true).catch((e) => console.error('sync 出错：' + e.message));
+        const left = getTasks(ep.id).filter(t => canPublish(t.platform) && t.state === 'scheduled');
+        if (!left.length && !getMeta(`done:${ep.id}`)) { setMeta(`done:${ep.id}`, 1); await notify(`🎉 ${ep.name}\n全部平台已发布\n${table(ep.id)}`); }
+      }
+    }
+    // 新发的一期头三天加密采样（每 6 小时一次），之后回到每天一次
+    for (const ep of episodes()) {
+      const pub = Date.parse(ep.schedule || ep.created_at); if (!(Date.now() > pub + 30 * MIN && Date.now() < pub + 72 * 3600e3)) continue;
+      if (!getTasks(ep.id).some(t => t.state === 'published') || !every(`sample:${ep.id}`, (config.sampleHours || 6) * 60 * MIN)) continue;
+      await collectMetrics(ep).catch((e) => console.error('加密采样出错：' + e.message));
+    }
+    // 登录保活：定期打开一下后台首页（视频号的扫码登录过期快），掉线就提醒，并记下每次保持了多久
+    for (const id of config.keepAlive || []) {
+      if (DISABLED.has(id) || !canPublish(id)) continue;
+      if (!every(`keep:${id}`, (config.keepAliveMinutes || 60) * MIN)) continue;
+      const ok = await drv.withTab(LOGIN_PAGES[id], async (t) => !/login|passport|signin/i.test((await chrome.tabs.get(t)).url) && !(await drv.evaluate(t, `/扫码登录/.test(document.body.innerText) && /验证码登录|密码登录/.test(document.body.innerText)`).catch(() => false)), { wait: 12000 }).catch(() => null);
+      if (ok === null) continue;
+      const was = getMeta(`login:${id}`);
+      if (ok && was !== 'ok') { setMeta(`login:${id}`, 'ok'); setMeta(`loginReason:${id}`, ''); setMeta(`loginSince:${id}`, Date.now()); }
+      if (!ok && was !== 'out') {
+        const since = +getMeta(`loginSince:${id}`) || 0; setMeta(`login:${id}`, 'out');
+        // 原因直接挂到平台状态上（系统页那一行动显示），不只留在「最近动态」里
+        setMeta(`loginReason:${id}`, since ? `登录过期，这次保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时` : '登录过期，请重新扫码');
+        log('', id, 'login-expired', since ? `保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时` : '');
+        await notify(`🔑 ${NAMES[id]}登录过期了${since ? `（这次保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时）` : ''}\n发布前请在专用 Chrome 里重新扫码：${LOGIN_PAGES[id]}`);
+      }
+    }
+    // 每天上午 10 点后采一次流量（最近 30 天的期数）
+    const metricsDay = latestDailyDay(10);
+    if ((getMeta('metricsCutoffDay') || getMeta('metricsDay')) !== metricsDay) {
+      setMeta('metricsCutoffDay', metricsDay); setMeta('metricsDay', latestDailyDay(0));
+      await metricsReport(episodes().filter(e => Date.now() - Date.parse(e.created_at) < 30 * 86400e3)).catch((e) => console.error('流量采集出错：' + e.message));
+      // 采完流量：到第 1/3/7 天的期出复盘卡片，周一出周报（每条只发一次）
+      try { const R = await import('./review.mjs'); for (const t of R.due((k) => { if (getMeta(k)) return false; setMeta(k, Date.now()); return true; })) await notify(t); }
+      catch (e) { console.error('复盘出错：' + e.message); }
+    }
+    // 发布前一晚 20 点后：第二天要发、还没开跑的期，先查一遍登录，掉线的今晚就扫码
+    for (const ep of episodes()) {
+      const sched = ep.schedule ? Date.parse(ep.schedule) : 0;
+      if (!sched || !eveningCheckDue(sched, Date.now(), scheduleDeadline('daemon'))) continue;
+      if (!getTasks(ep.id).some(t => t.state === 'planned') || getMeta(`eve:${ep.id}`)) continue;
+      setMeta(`eve:${ep.id}`, Date.now());
+      const bad = await doctor().catch(() => null);
+      if (bad && !bad.length) await notify(`🌙 ${ep.name}\n定于 ${ep.schedule.replace('T', ' ').slice(0, 16)} 发布，${ALL().length} 个平台登录都正常`);
+      else if (bad) await notify(`🌙 ${ep.name}\n定于 ${ep.schedule.replace('T', ' ').slice(0, 16)} 发布，请提前登录这些平台：${bad.map(i => NAMES[i]).join('、')}`);
+    }
+    // 每天上午体检一次，有平台掉线才通知
+    const day = latestDailyDay(9);
+    if ((getMeta('doctorCutoffDay') || getMeta('doctorDay')) !== day) {
+      setMeta('doctorCutoffDay', day); setMeta('doctorDay', latestDailyDay(0));
+      await doctor().catch((e) => console.error('体检出错：' + e.message));
+    }
+  }
+  await Promise.all([
+    watchSchedule('sales', () => SITE?.salesOnly, syncScheduledSales, e => console.error('小鹅通销售同步出错：' + e.message)),
+    watchSchedule('daemon', () => true, checkDaemon, e => console.error('守护检查出错：' + e.message)),
+    watchPublications(),
+  ]);
 }
 
 let code = 0;

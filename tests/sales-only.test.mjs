@@ -26,7 +26,7 @@ function fixture(t, provider = 'xiaoe') {
     export async function ensure() { call('ensure', []); }
     export async function close() {}
     export async function busy() { return false; }
-    export async function sleep(ms) { if (ms === 300000) throw new Error('TEST_DAEMON_STOP'); }
+    export async function sleep(ms) { if (process.argv[2] === 'daemon') throw new Error('TEST_DAEMON_STOP'); }
     export async function withTab(url) { call('withTab', [url]); throw new Error('TEST_BROWSER_BLOCKED'); }
     export async function evaluate() { throw new Error('TEST_BROWSER_BLOCKED'); }
     export async function click() { throw new Error('TEST_BROWSER_BLOCKED'); }
@@ -41,7 +41,7 @@ function fixture(t, provider = 'xiaoe') {
     export async function openForLogin(urls) { call('openForLogin', urls); }
     export async function runBatch(project, batch) { call('runBatch', batch); return {}; }
   `);
-  fs.writeFileSync(path.join(dir, 'src/board.mjs'), 'export async function boardSync() { return null; } export async function syncSalesIfDue() { return null; }');
+  fs.writeFileSync(path.join(dir, 'src/board.mjs'), 'export async function boardSync() { return null; } export async function syncScheduledSales() { return null; }');
   const env = { ...process.env, MAITIAN_CONFIG: config, MAITIAN_DB: path.join(dir, 'hub.db'), TEST_CALLS: calls, HUB_NO_WEB: '1', NODE_NO_WARNINGS: '1' };
   const run = (args) => spawnSync(process.execPath, args, { cwd: dir, env, encoding: 'utf8', timeout: 10000 });
   const script = (code) => run(['--input-type=module', '-e', code]);
@@ -123,6 +123,48 @@ test('daemon ignores stored zsz pending, scheduled and waiting tasks', t => {
   for (const state of ['pending', 'scheduled', 'awaiting_user']) seedEpisode(f, project(f, state), state);
   const before = tasks(f); const r = f.run('daemon'); assert.match(r.stderr, /TEST_DAEMON_STOP/);
   noCourseCalls(f); assert.deepEqual(tasks(f), before);
+});
+test('daily routine checks preserve separate publication windows for a pending course and X article', t => {
+  const f = fixture(t, 'custom');
+  const later = new Date(Date.now() + 12 * 3600000).toLocaleTimeString('en-GB', {timeZone:'Asia/Shanghai'}).slice(0, 5);
+  const daily = { mode: 'daily', times: [later] };
+  fs.writeFileSync(f.env.MAITIAN_CONFIG, JSON.stringify({ ...f.cfg, plugin: 'local', schedules: { sales: daily, daemon: daily } }));
+  fs.mkdirSync(path.join(f.dir, 'tools')); fs.writeFileSync(path.join(f.dir, 'tools/x-article-quote.mjs'), '');
+  fs.mkdirSync(path.join(f.dir, 'data'));
+  const clock = Date.now();
+  for (const [id, minutes] of [['due', 24], ['future', 60], ['expired', -400]]) {
+    const dir = project(f, id), file = path.join(dir, 'publish.json'), pj = JSON.parse(fs.readFileSync(file));
+    pj.platforms.x = { mode: 'article+quote', article: 'example.txt' };
+    pj.schedule = new Date(clock + minutes * 60000).toISOString();
+    fs.writeFileSync(file, JSON.stringify(pj)); seedEpisode(f, dir);
+    const d = f.db();
+    d.prepare("INSERT INTO tasks(episode_id,platform,state) VALUES (?,'x','scheduled')").run(id);
+    d.close();
+  }
+  const shim = path.join(f.dir, 'children.cjs');
+  fs.writeFileSync(shim, `
+    const child = require('node:child_process'), fs = require('node:fs');
+    child.execFileSync = () => Buffer.alloc(0);
+    child.spawn = (command, args) => {
+      fs.appendFileSync(process.env.TEST_CALLS,JSON.stringify({name:'spawn',command,args})+'\\n');
+      return Object.assign(new (require('node:events').EventEmitter)(),{unref(){}});
+    };
+    require('node:module').syncBuiltinESMExports();
+  `);
+  f.env.NODE_OPTIONS = '--require ' + JSON.stringify(shim);
+  function runPass() {
+    const r = f.run('daemon'); assert.match(r.stderr, /TEST_DAEMON_STOP/);
+    const d = f.db();
+    assert.equal(d.prepare("SELECT value FROM meta WHERE key='daemonCheckAttempt'").get(), undefined);
+    d.close();
+  }
+  runPass();
+  const workers = f.calls().filter(call => call.name === 'spawn');
+  assert.equal(workers.length, 2);
+  assert.ok(workers.some(call => call.command === 'caffeinate' && call.args.at(-1) === 'due'));
+  assert.ok(workers.some(call => call.args.includes(path.join(f.dir, 'due')) && call.args.at(-1) === 'zsz'));
+  runPass();
+  assert.equal(f.calls().filter(call => call.name === 'spawn').length, 2);
 });
 test('sales review keeps cents and excludes stale attribution and registration', t => {
   const f = fixture(t);
