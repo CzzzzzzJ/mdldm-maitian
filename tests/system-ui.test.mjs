@@ -17,7 +17,7 @@ const settings = {
   bilibiliAccounts: [{ id: 'default', name: '<主号>', uid: '123', enabled: true }],
 };
 const secret = 'https://example.invalid/private-hook';
-function fixture(getSettings = true) {
+function fixture(getSettings = true, overviewData = overview) {
   const elements = new Map([['#app', {}]]);
   const listeners = {}, calls = [];
   const ctx = vm.createContext({
@@ -30,10 +30,10 @@ function fixture(getSettings = true) {
     fetch: async (url, options) => {
       calls.push([url, options ? JSON.parse(options.body) : null]);
       const responses = {
-        '/api/overview': overview, '/api/bilibili-accounts': getSettings ? settings : null,
+        '/api/overview': overviewData, '/api/bilibili-accounts': getSettings ? settings : null,
         '/api/integrations': { feishu: { webhook: secret, login: true }, site: {} },
         '/api/integrations/feishu': { feishu: { configured: true, login: true } },
-        '/api/platform-toggle': { ok: true },
+        '/api/platform-toggle': { ok: true }, '/api/action': { ok: true },
       };
       return { ok: responses[url] != null, status: 404, json: async () => responses[url] };
     },
@@ -56,6 +56,32 @@ test('System renders named account controls and keeps secrets out of rendered HT
   assert.doesNotMatch(html, /<待检查>|<副号>|<主号>|private-hook|data-remove-account="0"/);
   assert.doesNotMatch(html, /同步知识站数据/);
 });
+test('System puts the single enabled site sync action under 收入来源, outside 平台', async () => {
+  const { calls, elements, listeners, run } = fixture(true, { ...overview, siteOn: true, siteName: '课程站' });
+  await run('load()');
+  const html = elements.get('#app').innerHTML;
+  const actions = [...html.matchAll(/data-act='([^']+)'[^>]*>同步课程站数据<\/button>/g)];
+  assert.equal(actions.length, 1);
+  assert.equal([...html.matchAll(/&quot;type&quot;:&quot;board&quot;/g)].length, 1);
+  assert.ok(html.indexOf('<h2>平台</h2>') < html.indexOf('<h2>集成</h2>'));
+  assert.ok(html.indexOf('<h2>集成</h2>') < html.indexOf('<h2>收入来源</h2>'));
+  assert.match(html.slice(html.indexOf('<h2>收入来源</h2>')), /同步课程站数据/);
+  const button = { dataset: { act: actions[0][1].replaceAll('&quot;', '"') } };
+  await listeners.click[0]({ target: { closest: s => s === '[data-act]' ? button : null } });
+  assert.deepEqual(calls.filter(([url]) => url === '/api/action'), [['/api/action', { type: 'board' }]]);
+});
+
+test('System omits the revenue sync section when site sync is disabled or unspecified', async () => {
+  const { siteOn, ...missingSiteState } = overview;
+  for (const data of [overview, missingSiteState]) {
+    const { elements, run } = fixture(true, data);
+    await run('load()');
+    const html = elements.get('#app').innerHTML;
+    assert.doesNotMatch(html, /收入来源|&quot;type&quot;:&quot;board&quot;/);
+    assert.match(html, /<h3>知识站<\/h3>/);
+  }
+});
+
 test('System remains usable on a legacy server without the settings API', async () => {
   const { elements, run } = fixture(false);
   await run('load()');
