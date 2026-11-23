@@ -78,6 +78,7 @@ if ((s = sec('B站'))) platforms.bilibili = { covers: pick('4x3'), title: field(
 if ((s = sec('小红书'))) { const b = splitTopics(field(s, '正文') || ''); platforms.xhs = { covers: pick('3x4'), title: field(s, '标题'), body: b.body, topics: b.topics }; }
 if ((s = sec('抖音'))) { const b = splitTopics(field(s, '正文') || ''); platforms.douyin = { covers: pick('4x3', '3x4'), title: field(s, '标题'), body: b.body, topics: b.topics }; }
 if ((s = sec('视频号'))) { const b = splitTopics(field(s, '描述') || ''); platforms.channels = { covers: pick('4x3', '3x4'), shortTitle: field(s, '短标题'), body: b.body, topics: b.topics }; }
+if ((s = sec('快手'))) { const b = splitTopics(field(s, '正文') || ''); platforms.kuaishou = { covers: pick('4x3', '3x4'), title: field(s, '标题'), body: b.body, topics: b.topics }; }
 if ((s = sec('YouTube'))) platforms.youtube = { covers: pick('16x9'), title: field(s, '标题'), desc: field(s, '简介'), tags: (field(s, '标签') || '').split(/[,，]/).map(x => x.trim()).filter(Boolean) };
 if ((s = sec('X'))) {
   platforms.x = { covers: [], text: clean(s) };

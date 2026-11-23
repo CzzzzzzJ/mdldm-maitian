@@ -19,7 +19,7 @@ const { db, upsertEpisode, setTask, saveSnapshot, log, setMeta } = await import(
 await import('./followers.mjs');   // 建 followers 表
 
 if (fresh) {
-  const DAY = 864e5, now = Date.now(), PL = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'zsz'];
+  const DAY = 864e5, now = Date.now(), PL = ['bilibili', 'douyin', 'xhs', 'channels', 'kuaishou', 'youtube', 'x', 'zsz'];
   const bj = (t) => new Date(t + 8 * 3600e3).toISOString();
   const day = (t) => bj(t).slice(0, 10);
   let seed = 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
@@ -35,8 +35,8 @@ if (fresh) {
   const cover3 = (title, sub, i) => `<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="2048" viewBox="0 0 1536 2048"><defs><pattern id="g" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#141414" stroke-opacity=".06"/></pattern></defs><rect width="1536" height="2048" fill="#f1eee6"/><rect width="1536" height="2048" fill="url(#g)"/><rect x="110" y="140" width="330" height="100" rx="14" fill="${COLORS[i % 8]}" stroke="#141414" stroke-width="7"/><text x="275" y="212" font-family="PingFang SC,sans-serif" font-size="54" font-weight="900" text-anchor="middle" fill="#141414">第 ${i + 1} 期</text>${title.match(/.{1,5}/g).slice(0, 4).map((l, k) => `<text x="110" y="${560 + k * 250}" font-family="PingFang SC,sans-serif" font-size="230" font-weight="900" fill="#141414">${l}</text>`).join('')}<rect x="110" y="${560 + Math.min(4, Math.ceil(title.length / 5)) * 250 - 150}" width="700" height="30" fill="${COLORS[i % 8]}"/><text x="110" y="1880" font-family="PingFang SC,sans-serif" font-size="80" font-weight="700" fill="#3a3a3a">${sub}</text></svg>`;
   const ins = db.prepare(`INSERT OR REPLACE INTO metrics (day, episode_id, platform, views, likes, comments, favorites, shares, extra, collected_at) VALUES (?,?,?,?,?,?,?,?,?,?)`);
   const insS = db.prepare(`INSERT OR REPLACE INTO samples (ts, episode_id, platform, views, likes, comments, favorites, shares) VALUES (?,?,?,?,?,?,?,?)`);
-  const W = { bilibili: 0.09, douyin: 0.33, xhs: 0.16, channels: 0.06, youtube: 0.02, x: 0.33, zsz: 0.01 };
-  const IR = { bilibili: 0.035, douyin: 0.03, xhs: 0.12, channels: 0.03, youtube: 0.02, x: 0.025, zsz: 0 };
+  const W = { bilibili: 0.09, douyin: 0.28, xhs: 0.16, channels: 0.06, kuaishou: 0.10, youtube: 0.02, x: 0.28, zsz: 0.01 };
+  const IR = { bilibili: 0.035, douyin: 0.03, xhs: 0.12, channels: 0.03, kuaishou: 0.03, youtube: 0.02, x: 0.025, zsz: 0 };
   EPS.forEach(([t1, t2, off], i) => {
     const id = `demo-${i + 1}`, dir = path.join(PROJ, id), at = at18(off), name = `${t1}｜${t2}`;
     fs.mkdirSync(path.join(dir, '封面'), { recursive: true });
@@ -59,7 +59,7 @@ if (fresh) {
     for (let h = 6; h <= 72 && at + h * 3600e3 < now; h += 6) for (const p of PL) { const v = Math.round(total * W[p] * (1 - Math.exp(-(h / 24 + .1) / 2.2))); insS.run(new Date(at + h * 3600e3).toISOString().slice(0, 16), id, p, v, Math.round(v * IR[p] * .5), 0, 0, 0); }
     db.prepare('INSERT OR REPLACE INTO site_campaigns (campaign, sources, reg, vip, orders, revenue, updated_at) VALUES (?,?,?,?,?,?,?)').run(camp, 'bilibili,x,youtube', Math.round(total / 900), Math.round(total / 6000), Math.round(total / 6000), Math.round(total / 6000) * 499, new Date().toISOString());
   });
-  const base = { bilibili: 15000, douyin: 12000, xhs: 18000, channels: 4300, youtube: 300, x: 5600, zsz: 3200 };
+  const base = { bilibili: 15000, douyin: 12000, xhs: 18000, channels: 4300, kuaishou: 9000, youtube: 300, x: 5600, zsz: 3200 };
   const insF = db.prepare('INSERT OR REPLACE INTO followers (day, platform, total, gain, loss, source, collected_at) VALUES (?,?,?,?,?,?,?)');
   for (const p of Object.keys(base)) { let v = base[p]; for (let d = 40; d >= 0; d--) { const g = Math.round(base[p] * 0.0015 * (0.5 + rnd() * 1.5)); v += g; insF.run(day(now - d * DAY), p, v, g, 0, 'demo', new Date().toISOString()); } }
   const insD = db.prepare('INSERT OR REPLACE INTO site_daily (day, reg, vip, orders, revenue) VALUES (?,?,?,?,?)');

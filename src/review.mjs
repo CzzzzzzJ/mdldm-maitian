@@ -2,7 +2,7 @@
 import { db, episodes, getTasks, NAMES } from './db.mjs';
 import { SITE } from './site.mjs';
 
-const PL = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'zsz'];
+const PL = ['bilibili', 'douyin', 'xhs', 'channels', 'kuaishou', 'youtube', 'x', 'instagram', 'zsz'];
 const DAY = 864e5;
 const fmt = (n) => n == null ? '–' : Math.round(n).toLocaleString('en-US');
 const pct = (a, b, d = 1) => b ? (a / b * 100).toFixed(d) + '%' : '–';

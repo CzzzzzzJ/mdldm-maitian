@@ -29,6 +29,18 @@ export const collectors = {
     const st = await withTab('https://creator.douyin.com/creator-micro/content/manage', async (t) => { for (let i = 0; i < 15 && !(await evaluate(t, `document.querySelectorAll('[class*=video-card-info]').length`).catch(() => 0)); i++) await sleep(2000); await sleep(1500); return evaluate(t, `(()=>{for(const c of document.querySelectorAll('[class*=video-card-info]')){const k=Object.keys(c).find(k=>k.startsWith('__reactFiber'));let f=c[k];for(let i=0;i<25&&f;i++,f=f.return){const pr=f.memoizedProps;if(!pr)continue;const v=Object.values(pr).find(v=>v&&typeof v==='object'&&v.aweme_id&&v.desc!==undefined);if(v){if((${J(id)}&&v.aweme_id===${J(id)})||v.item_title===${J(p.title)})return v.statistics||null;break;}}}return null})()`); }, { wait: 6000 });
     return st && { views: st.play_count, likes: st.digg_count, comments: st.comment_count, favorites: st.collect_count, shares: st.share_count };
   },
+  async kuaishou({ url, p }) {
+    const id = idOf(url, /short-video\/([\w-]+)/);
+    const text = await withTab('https://cp.kuaishou.com/article/manage/video', async (t) => {
+      await sleep(4000);
+      return evaluate(t, `(()=>{const cards=[...document.querySelectorAll('a[href],article,[class*=card],[class*=item]')];
+        const c=cards.find(e=>e.innerText&&(${J(id)}&&e.href&&e.href.includes(${J(id)}))||e.innerText.includes(${J(p.title||p.body||'')}));
+        return c?c.innerText:null})()`);
+    }, { wait: 8000 });
+    if (!text) return null;
+    const get = (label) => num((text.match(new RegExp(label+'\\s*([\\d,.万亿KM]+)','i'))||[])[1]);
+    return { views: get('播放'), likes: get('点赞'), comments: get('评论'), shares: get('分享') };
+  },
   async channels({ p }) {
     const first = p.body.split('\n')[0].trim().slice(0, 30);
     const n = await withTab('https://channels.weixin.qq.com/platform/post/list', (t) => evaluate(t, `(()=>{const R=document.querySelector('wujie-app')&&document.querySelector('wujie-app').shadowRoot;if(!R)return null;const c=[...R.querySelectorAll('.post-feed-item')].find(c=>c.innerText.trim().startsWith(${J(first)}));if(!c)return null;const o={};for(const d of c.querySelectorAll('.data-item')){const k=/eyes/.test(d.innerHTML)?'views':/outlined-like/.test(d.innerHTML)?'likes':/comment/.test(d.innerHTML)?'comments':/icon-share/.test(d.innerHTML)?'shares':/thumb/.test(d.innerHTML)?'recommend':'';if(k)o[k]=d.innerText.trim()}return o})()`), { wait: 14000 });
