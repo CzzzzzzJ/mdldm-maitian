@@ -2,7 +2,9 @@
 import { db, getMeta, episodes, getTasks, NAMES } from './db.mjs';
 import { SITE, matchesSiteData } from './site.mjs';
 
-const PL = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'zsz'].filter(p => p !== 'zsz' || !SITE?.salesOnly);
+const PL = [
+  'bilibili', 'douyin', 'xhs', 'channels', 'zhihu', 'youtube', 'x', 'instagram', 'zsz',
+].filter(p => p !== 'zsz' || !SITE?.salesOnly);
 const DAY = 864e5;
 const fmt = (n) => n == null ? '–' : Math.round(n).toLocaleString('en-US');
 const pct = (a, b, d = 1) => b ? (a / b * 100).toFixed(d) + '%' : '–';

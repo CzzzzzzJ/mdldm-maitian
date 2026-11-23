@@ -14,6 +14,7 @@
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import crypto from 'node:crypto'; import { execFileSync, spawn } from 'node:child_process';
 import { db, NAMES, LOCKED, STATE_CN, upsertEpisode, getTask, getTasks, setTask, log, episodes, getEpisode, recentLogs, getMeta, setMeta, saveMetric, prevMetric, saveSnapshot } from './db.mjs';
 import { collectors } from './metrics.mjs';
+import { waitsForUser } from './zhihu.mjs';
 import { boardSync, syncSalesIfDue } from './board.mjs';
 const board = (o) => boardSync(o).then((r) => { if (r) console.log('看板已同步：' + JSON.stringify(r)); return r; }).catch((e) => { console.error('看板同步出错：' + e.message); });
 import { config, notify } from './feishu.mjs';
@@ -61,11 +62,27 @@ const projectOf = (ep, pj) => ({ dir: path.relative(config.rootPath, ep.dir), da
 // 停用的平台：config.disabled（系统页里开关）。从登录、体检、保活、发布、采粉丝里都去掉
 // 每次现读 config.disabled：网页「系统 → 平台」改的是同一个 config 对象，守护进程不用重启就生效
 export const DISABLED = { has: (id) => (config.disabled || []).includes(id) };
-const ALL_IDS = ['bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : []), 'zsz'];
+const ALL_IDS = [
+  'bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram',
+  ...(config.batches?.flat().includes('wechat') ? ['wechat'] : []),
+  ...(config.batches?.flat().includes('zhihu') ? ['zhihu'] : []),
+  'zsz',
+];
 // 每次都重算：知识站可能在系统页停用（SITE 热更新），停用的平台由 config.disabled 决定
 const canPublish = id => id !== 'zsz' || !SITE?.salesOnly;
 const ALL = () => ALL_IDS.filter(id => (id !== 'zsz' || SITE) && !DISABLED.has(id) && canPublish(id));   // 没配自有站点就不管 zsz；停用的不管
-const LOGIN_PAGES = { wechat: 'https://mp.weixin.qq.com/', bilibili: 'https://member.bilibili.com/platform/upload/video/frame', xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video', douyin: 'https://creator.douyin.com/creator-micro/content/upload', channels: 'https://channels.weixin.qq.com/platform/post/create', youtube: 'https://studio.youtube.com/', x: 'https://x.com/home', instagram: 'https://www.instagram.com/', get zsz() { return SITE ? SITE.admin : ''; } };
+const LOGIN_PAGES = {
+  wechat: 'https://mp.weixin.qq.com/',
+  bilibili: 'https://member.bilibili.com/platform/upload/video/frame',
+  xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video',
+  douyin: 'https://creator.douyin.com/creator-micro/content/upload',
+  channels: 'https://channels.weixin.qq.com/platform/post/create',
+  zhihu: 'https://www.zhihu.com/zvideo/upload-video',
+  youtube: 'https://studio.youtube.com/',
+  x: 'https://x.com/home',
+  instagram: 'https://www.instagram.com/',
+  get zsz() { return SITE ? SITE.admin : ''; },
+};
 
 function table(eid) {
   return getTasks(eid).map(t => `${NAMES[t.platform] || t.platform}：${STATE_CN[t.state] || t.state}${t.detail ? `（${t.detail.slice(0, 80)}）` : ''}${t.url ? ` ${t.url}` : ''}`).join('\n');
@@ -99,7 +116,10 @@ async function after(ep, pj, id, res) {
       const got = await douyinTopics(res.tabId).catch(() => []);
       if (got.length !== (p.topics || []).length) { setTask(ep.id, id, 'awaiting_user', `话题只识别了 ${got.length}/${p.topics.length} 个，发之前请补`); return; }
     }
-    if (config.manual.includes(id)) { setTask(ep.id, id, 'awaiting_user', pj.schedule ? '已设定时，核对后点「定时发布」' : '核对后点发布'); return; }
+    if (waitsForUser(id, config.manual || [])) {
+      setTask(ep.id, id, 'awaiting_user', pj.schedule ? '已设定时，核对后点「定时发布」' : '核对后点发布');
+      return;
+    }
     if (id === 'zsz') {
       const cs = await zszCourses(p.title);
       if (cs.length === 1) setTask(ep.id, id, cs[0].vis === 'published' ? 'published' : 'scheduled', cs[0].vis === 'published' ? '已上线' : '转码中，完成后自动上线', { url: SITE.courseUrl(cs[0]) });

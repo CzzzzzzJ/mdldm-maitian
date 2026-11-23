@@ -10,6 +10,7 @@
 //   ## 七、YouTube   **标题：** / **简介：** / **标签：**（逗号分隔）
 //   ## 八、X         整节就是推文
 //   ## 九、Instagram 整节就是配文（链接点不了，话题标签写在末尾）
+//   ## 十一、知乎     **标题：** / **简介：** / **话题：**（封面优先 16:9）
 // 工程目录里：成片.mp4、封面/cover-3x4.png、cover-4x3.png、cover-16x9.jpg（有哪个用哪个）
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, basename, dirname, sep } from 'node:path';
@@ -17,6 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
 import { pluginDir } from './plugin.mjs';
+import { zhihuCopy } from './zhihu.mjs';
 // 字段规则来自麦田发布助手（默认是商店版，跟着插件自动更新）
 const { validate } = await import(pathToFileURL(join(pluginDir(), 'lib', 'bundle.js')).href);
 
@@ -84,6 +86,7 @@ if ((s = sec('X'))) {
 }
 
 if ((s = sec('Instagram'))) platforms.instagram = { covers: pick('16x9', '4x3').slice(0, 1), ...(files.includes('成片-ig.mp4') ? { video: '成片-ig.mp4' } : {}), caption: clean(s.split('\n').filter(l => !/^>/.test(l)).join('\n')) };
+if ((s = sec('知乎'))) platforms.zhihu = { covers: pick('16x9', '4x3').slice(0, 1), ...zhihuCopy(s) };
 
 // 成片时长（秒）：有 ffprobe 就读出来，给需要时长的平台用
 let durationSec;

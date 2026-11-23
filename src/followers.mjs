@@ -1,6 +1,7 @@
 // 粉丝采集：只读自己账号的粉丝数，每天一次。平台后台自带趋势的（B站 90 天、小红书 30 天、视频号 7 天、知识站 30 天）顺手补历史。
 import { evaluate, withTab, sleep } from './driver.mjs';
 import { num } from './metrics.mjs';
+import { zhihuFollowerCount } from './zhihu.mjs';
 import { db } from './db.mjs';
 import { config } from './feishu.mjs';
 import { SITE } from './site.mjs';
@@ -53,6 +54,12 @@ export const followerCollectors = {
     }, { wait: 6000 });
     const total = num(n); return total != null && { total, history: [] };
   },
+  async zhihu() {
+    const me = await withTab('https://www.zhihu.com/creator', (t) => evaluate(t,
+      `fetch('/api/v4/me',{credentials:'include'}).then(r=>r.ok?r.json():null)`));
+    const total = zhihuFollowerCount(me);
+    return total != null && { total, history: [] };
+  },
   async zsz() {   // 知识站的「粉丝」= 注册用户
     if (!SITE || SITE.salesOnly) return null;
     const r = await withTab(SITE.admin, (t) => evaluate(t, `${get(SITE.dashboardApi)}.then(x=>({total:x.funnel.totalRegistered,trend:x.registrationTrend||[]}))`));
@@ -78,6 +85,8 @@ export function saveFollowers(platform, r) {
 export async function collectFollowers(only, skip = []) {
   const out = {}, off = new Set([...(config.disabled || []), ...skip]);
   for (const [p, fn] of Object.entries(followerCollectors)) {
+    // 知乎默认不采：没写进 batches 就不要每天打开创作者后台
+    if (p === 'zhihu' && !(config.batches || []).flat().includes('zhihu')) continue;
     if ((p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p)) continue;
     try { const r = await fn(); if (!r) { out[p] = '没读到'; continue; } const n = saveFollowers(p, r); out[p] = { total: r.total, backfilled: n }; }
     catch (e) { out[p] = '出错：' + e.message.slice(0, 80); }

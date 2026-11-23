@@ -1,6 +1,7 @@
 // 流量采集：只读自己创作者后台的数据，每天一次。按作品 ID 匹配（标题在平台上可能改过）。
 import { evaluate, withTab, sleep } from './driver.mjs';
 import { SITE } from './site.mjs';
+import { zhihuStats, zhihuVideoId } from './zhihu.mjs';
 
 const J = JSON.stringify;
 // "1.2万" "6,017" "5.3K" → 数字
@@ -70,6 +71,14 @@ export const collectors = {
       const r=await fetch('/api/v1/media/'+pk+'/info/',{credentials:'include',headers:{'X-IG-App-ID':'936619743392459'}});if(!r.ok)return null;const it=((await r.json()).items||[])[0];
       return it?{views:it.play_count??it.ig_play_count,likes:it.like_count,comments:it.comment_count,shares:it.reshare_count}:null})()`), { wait: 6000 });
     return m && { views: m.views ?? null, likes: m.likes ?? null, comments: m.comments ?? null, shares: m.shares ?? null };
+  },
+  async zhihu({ url }) {
+    const id = zhihuVideoId(url);
+    if (!id) return null;
+    const raw = await withTab(`https://www.zhihu.com/zvideo/${id}`, (t) => evaluate(t,
+      `fetch('/api/v4/zvideos/'+${J(id)},{credentials:'include'}).then(r=>r.ok?r.json():null)`));
+    const video = raw && (raw.play_count != null ? raw : (raw.zvideo || raw.data));
+    return zhihuStats(video);
   },
   async zsz({ url, p }) {
     const id = idOf(url, /courseId=(\w+)/);
