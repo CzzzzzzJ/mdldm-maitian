@@ -1,6 +1,6 @@
 // 粉丝采集：只读自己账号的粉丝数，每天一次。平台后台自带趋势的（B站 90 天、小红书 30 天、视频号 7 天、知识站 30 天）顺手补历史。
 import { evaluate, withTab, sleep } from './driver.mjs';
-import { num } from './metrics.mjs';
+import { num, TH_FOLLOWERS } from './metrics.mjs';
 import { db } from './db.mjs';
 import { config } from './feishu.mjs';
 import { SITE } from './site.mjs';
@@ -53,13 +53,13 @@ export const followerCollectors = {
     }, { wait: 6000 });
     const total = num(n); return total != null && { total, history: [] };
   },
-  async threads() {   // 读自己主页上的「×× 位粉丝」：左侧栏「个人主页」→ /@用户名
+  async threads() {   // 读自己主页上的「×× 位粉丝」（繁体界面是「×× 位粉絲」）：左侧栏「个人主页」→ /@用户名
     const n = await withTab('https://www.threads.com/', async (t) => {
       let u = null;
       for (let i = 0; i < 8 && !u; i++) { await sleep(2000); u = await evaluate(t, `(()=>{const a=[...document.querySelectorAll('a[href^="/@"]')].find(a=>/个人主页|Profile/.test((a.getAttribute('aria-label')||'')+a.innerText)||a.getBoundingClientRect().x<120);return a?a.getAttribute('href').split('/').slice(0,2).join('/'):null})()`).catch(() => null); }
       if (!u) return null;
       await evaluate(t, `(location.href=${JSON.stringify(u)},1)`);
-      for (let i = 0; i < 8; i++) { await sleep(2500); const v = await evaluate(t, `(document.body.innerText.match(/([\\d,.]+\\s*[万KM]?)\\s*(?:位粉丝|粉丝|followers)/i)||[])[1]||''`).catch(() => ''); if (v) return v; }
+      for (let i = 0; i < 8; i++) { await sleep(2500); const v = await evaluate(t, `(document.body.innerText.match(${TH_FOLLOWERS})||[])[1]||''`).catch(() => ''); if (v) return v; }
       return null;
     }, { wait: 6000 });
     const total = num(n); return total != null && { total, history: [] };
