@@ -1,7 +1,7 @@
 #!/bin/bash
 # howieip-studio 一行安装：
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install.sh)"
-# 做的事：检查 git 和 Node（≥22.5）→ 把上游仓库 mdldm-maitian 下载到 ~/howieip-studio/ → 运行安装向导（howieip-studio 发布助手从 Chrome 应用商店装）
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/HowieZhao95/mdldm-maitian/feat/howieip-studio-discord/scripts/install.sh)"
+# 做的事：检查 git 和 Node（≥22.5）→ 把 HowieZhao95/mdldm-maitian 下载到 ~/howieip-studio/ → 运行安装向导
 # 换目录：HOWIEIP_STUDIO_HOME=~/somewhere bash -c "$(curl -fsSL …)"
 set -e
 DIR=${HOWIEIP_STUDIO_HOME:-$HOME/howieip-studio}
@@ -14,17 +14,17 @@ node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a
 
 mkdir -p "$DIR"; cd "$DIR"
 for R in mdldm-maitian; do
-  if [ -d "$R/.git" ]; then say "更新 $R"; git -C "$R" pull --ff-only -q; else say "下载 $R"; for i in 1 2 3; do git clone --depth 1 "https://github.com/CzzzzzzJ/$R.git" && break; echo "下载失败，第 $i 次重试"; rm -rf "$R"; sleep 3; done; [ -d "$R/.git" ] || { echo "$R 下载失败，检查网络后重跑这条命令"; exit 1; }; fi
+  if [ -d "$R/.git" ]; then say "更新 $R"; git -C "$R" pull --ff-only -q; else say "下载 $R"; for i in 1 2 3; do git clone --depth 1 "https://github.com/HowieZhao95/$R.git" && break; echo "下载失败，第 $i 次重试"; rm -rf "$R"; sleep 3; done; [ -d "$R/.git" ] || { echo "$R 下载失败，检查网络后重跑这条命令"; exit 1; }; fi
 done
 
 say "howieip-studio 发布助手（Chrome 插件）"
 echo "从 Chrome 应用商店装，安装向导最后会在 howieip-studio 的专用 Chrome 里打开商店页，点「添加至 Chrome」即可，之后自动更新"
 
 say "发布 skill"
-L="$HOME/.claude/skills/maitian-publish"
-if [ -e "$L" ] || [ -L "$L" ]; then echo "~/.claude/skills/maitian-publish 已经存在，没动它"
-elif [ -d "$HOME/.claude/skills" ]; then ln -s "$DIR/mdldm-maitian/skills/maitian-publish" "$L"; echo "已链接到 ~/.claude/skills/maitian-publish（Claude Code 里说「整理发布」就会用上）"
-else echo "没找到 ~/.claude/skills；用 Claude Code 的话，把 $DIR/mdldm-maitian/skills/maitian-publish 放进 ~/.claude/skills/"; fi
+L="$HOME/.claude/skills/howieip-studio-publish"
+if [ -e "$L" ] || [ -L "$L" ]; then echo "~/.claude/skills/howieip-studio-publish 已经存在，没动它"
+elif [ -d "$HOME/.claude/skills" ]; then ln -s "$DIR/mdldm-maitian/skills/howieip-studio-publish" "$L"; echo "已链接到 ~/.claude/skills/howieip-studio-publish（Claude Code 里说「整理发布」就会用上）"
+else echo "没找到 ~/.claude/skills；用 Claude Code 的话，把 $DIR/mdldm-maitian/skills/howieip-studio-publish 放进 ~/.claude/skills/"; fi
 
 say "安装向导"
 [ -t 0 ] || { echo "安装向导需要在终端里交互：cd $DIR/mdldm-maitian && node src/init.mjs"; exit 0; }

@@ -1,5 +1,5 @@
 ﻿# howieip-studio · Windows 一键安装
-#   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install-windows.ps1 | iex"
+#   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/HowieZhao95/mdldm-maitian/feat/howieip-studio-discord/scripts/install-windows.ps1 | iex"
 # 做的事（与 scripts/install.sh 逐步对应）：检查 git 和 Node（≥22.5，缺了用 winget 装）→
 #   把上游仓库 mdldm-maitian 克隆到 %USERPROFILE%\howieip-studio\ → 拷双击启动器 → 接上发布 skill → 运行安装向导
 # 换目录：先设环境变量 HOWIEIP_STUDIO_HOME，如 $env:HOWIEIP_STUDIO_HOME = 'D:\howieip-studio' 再运行
@@ -52,7 +52,7 @@ foreach ($r in @('mdldm-maitian')) {
   else {
     $done = $false
     for ($i = 1; $i -le 3 -and -not $done; $i++) {
-      git clone --depth 1 "https://github.com/CzzzzzzJ/$r.git" $dest
+      git clone --depth 1 "https://github.com/HowieZhao95/$r.git" $dest
       if (Test-Path (Join-Path $dest '.git')) { $done = $true }
       else { Tip "下载失败，第 $i 次重试"; if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }; Start-Sleep -Seconds 3 }
     }
@@ -75,12 +75,12 @@ Write-Host '  从 Chrome 应用商店装：安装向导最后会在 howieip-stud
 # ---------- 6. 发布 skill ----------
 Say '发布 skill'
 $SkillDir = Join-Path $HOME '.claude\skills'
-$Link = Join-Path $SkillDir 'maitian-publish'
-if (Test-Path $Link) { Write-Host '  ~/.claude/skills/maitian-publish 已经存在，没动它' }
+$Link = Join-Path $SkillDir 'howieip-studio-publish'
+if (Test-Path $Link) { Write-Host '  ~/.claude/skills/howieip-studio-publish 已经存在，没动它' }
 elseif (Test-Path $SkillDir) {
-  New-Item -ItemType Junction -Path $Link -Target (Join-Path $Hub 'skills\maitian-publish') | Out-Null
-  Write-Host '  已链接到 ~/.claude/skills/maitian-publish（Claude Code 里说「整理发布」就会用上）'
-} else { Write-Host "  没找到 ~/.claude/skills；用 Claude Code 的话，把 $Hub\skills\maitian-publish 放进 ~/.claude/skills" }
+  New-Item -ItemType Junction -Path $Link -Target (Join-Path $Hub 'skills\howieip-studio-publish') | Out-Null
+  Write-Host '  已链接到 ~/.claude/skills/howieip-studio-publish（Claude Code 里说「整理发布」就会用上）'
+} else { Write-Host "  没找到 ~/.claude/skills；用 Claude Code 的话，把 $Hub\skills\howieip-studio-publish 放进 ~/.claude/skills" }
 
 # ---------- 7. 安装向导 ----------
 Say '安装向导'
