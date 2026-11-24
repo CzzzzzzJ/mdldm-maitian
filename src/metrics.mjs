@@ -71,6 +71,14 @@ export const collectors = {
       return it?{views:it.play_count??it.ig_play_count,likes:it.like_count,comments:it.comment_count,shares:it.reshare_count}:null})()`), { wait: 6000 });
     return m && { views: m.views ?? null, likes: m.likes ?? null, comments: m.comments ?? null, shares: m.shares ?? null };
   },
+  async threads({ url }) {   // 串文页底部的赞、回复、转发、分享（数字为 0 时不显示）；网页上看不到播放数，留空
+    if (!/\/post\//.test(url || '')) return null;
+    const m = await withTab(url, (t) => evaluate(t, `(()=>{const L={likes:['赞','取消赞','Like','Unlike'],comments:['回复','Reply'],reposts:['转发','Repost'],shares:['分享','Share']};const o={};let hit=0;
+      for(const [k,ls] of Object.entries(L)){const s=[...document.querySelectorAll('svg')].find(s=>ls.includes(s.getAttribute('aria-label')||(s.querySelector('title')||{}).textContent||''));const b=s&&s.closest('[role=button],button');if(!b){o[k]=null;continue}hit++;o[k]=b.innerText.trim()||'0'}
+      return hit?o:null})()`), { wait: 8000 });
+    if (!m) return null;
+    return { views: null, likes: num(m.likes), comments: num(m.comments), shares: num(m.reposts), extra: { 分享: num(m.shares) } };
+  },
   async zsz({ url, p }) {
     const id = idOf(url, /courseId=(\w+)/);
     if (!SITE || SITE.salesOnly) return null;
