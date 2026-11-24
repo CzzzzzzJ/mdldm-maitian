@@ -18,6 +18,7 @@ import { boardSync, syncSalesIfDue } from './board.mjs';
 const board = (o) => boardSync(o).then((r) => { if (r) console.log('看板已同步：' + JSON.stringify(r)); return r; }).catch((e) => { console.error('看板同步出错：' + e.message); });
 import { config, notify } from './feishu.mjs';
 import { systemActionTargets, checkSystemLogins } from './system-accounts.mjs';
+import { primaryBilibiliTarget } from './targets.mjs';
 import { collectFollowers } from './followers.mjs';
 import * as drv from './driver.mjs';
 import { SITE } from './site.mjs';
@@ -337,8 +338,10 @@ async function metricsReport(list, { accounts = true } = {}) {
   else console.log('没有已发布的平台可采集');
 }
 
-async function doctor() {
-  const targets = systemActionTargets(config, ALL(), cmd === 'doctor' ? args.slice(1) : []);
+async function doctor(publishPlatforms) {
+  const targets = publishPlatforms
+    ? publishPlatforms.map(id => id === 'bilibili' ? primaryBilibiliTarget(config) : { id, name:NAMES[id] || id })
+    : systemActionTargets(config, ALL(), cmd === 'doctor' ? args.slice(1) : []);
   if (!targets.length) return [];
   const p = pluginInfo();
   if (!p.dir) throw new Error(`还没装麦田发布助手：运行 node src/hub.mjs login，在专用 Chrome 里从应用商店添加（${STORE_URL}）`);
@@ -496,9 +499,12 @@ async function daemon() {
       for (const ep of episodes()) {
         const sched = ep.schedule ? Date.parse(ep.schedule) : 0;
         if (!sched || new Date().getHours() < 20 || sched - Date.now() < 6 * 3600e3 || sched - Date.now() > 30 * 3600e3) continue;
-        if (!getTasks(ep.id).some(t => t.state === 'planned') || getMeta(`eve:${ep.id}`)) continue;
+        if (getMeta(`eve:${ep.id}`)) continue;
+        const planned = getTasks(ep.id).filter(t => t.state === 'planned').map(t => t.platform);
+        const platforms = ALL().filter(id => planned.includes(id));
+        if (!platforms.length) continue;
         setMeta(`eve:${ep.id}`, Date.now());
-        const bad = await doctor().catch(() => null);
+        const bad = await doctor(platforms).catch(() => null);
         if (bad && !bad.length) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，所有已检查的账号登录都正常`);
         else if (bad) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，今晚先把这些平台登录好：${bad.join('、')}`);
       }

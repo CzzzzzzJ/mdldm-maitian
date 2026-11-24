@@ -40,12 +40,19 @@ export function accountsOf(cfg) {
     return { ...a, name, uid, enabled: a.enabled !== false && !a.removed, chromePort, chromeProfile };
   });
 }
+function bilibiliTarget(a) {
+  return {
+    id: a.id === 'default' ? 'bilibili' : `bilibili@${a.id}`, platform: 'bilibili', accountId: a.id,
+    name: a.name === '默认账号' ? 'B站' : `B站 · ${a.name}`, uid: a.uid, chromePort: a.chromePort, chromeProfile: a.chromeProfile,
+  };
+}
+export function primaryBilibiliTarget(cfg) {
+  return bilibiliTarget(accountsOf(cfg).find(a => a.id === 'default'));
+}
 export function getTargets(cfg) {
   const accounts = accountsOf(cfg), ids = enabledPlatforms(cfg);
-  return ids.flatMap(platform => platform === 'bilibili' ? accounts.filter(a => a.enabled).map(a => ({
-    id: a.id === 'default' ? 'bilibili' : `bilibili@${a.id}`, platform, accountId: a.id,
-    name: a.name === '默认账号' ? 'B站' : `B站 · ${a.name}`, uid: a.uid, chromePort: a.chromePort, chromeProfile: a.chromeProfile,
-  })) : [{ id: platform, platform, name: platform === 'zsz' ? (cfg.site?.name || PLATFORM_NAMES[platform]) : PLATFORM_NAMES[platform], chromePort: cfg.chromePort || 9333, chromeProfile: homePath(cfg.chromeProfile || '~/publish-hub/chrome-profile') }]);
+  return ids.flatMap(platform => platform === 'bilibili' ? accounts.filter(a => a.enabled).map(bilibiliTarget)
+    : [{ id: platform, platform, name: platform === 'zsz' ? (cfg.site?.name || PLATFORM_NAMES[platform]) : PLATFORM_NAMES[platform], chromePort: cfg.chromePort || 9333, chromeProfile: homePath(cfg.chromeProfile || '~/publish-hub/chrome-profile') }]);
 }
 export function getTarget(cfg, id) {
   const target = getTargets(cfg).find(t => t.id === id);

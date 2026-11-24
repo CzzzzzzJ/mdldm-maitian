@@ -22,7 +22,11 @@ function fixture(t) {
     bilibiliAccounts:[{id:'default',name:'主号',uid:'101'}, {id:'second',name:'副号',uid:'202',chromePort:24202,chromeProfile:path.join(dir, 'secondary')}],
   };
   const settings = path.join(dir, 'config.json'), trace = path.join(dir, 'trace'), database = path.join(dir, 'hub.db');
-  fs.writeFileSync(path.join(src, 'bridge.mjs'), 'export const sleep = async () => {};');
+  fs.writeFileSync(path.join(src, 'bridge.mjs'), `
+    export async function sleep(ms) {
+      if (ms === 300000 && process.env.SYSTEM_ONE_TICK === '1') process.exit(0);
+    }
+  `);
   fs.writeFileSync(path.join(src, 'chrome-shim.mjs'), `
     import { AsyncLocalStorage } from 'node:async_hooks';
     import fs from 'node:fs';
@@ -39,13 +43,21 @@ function fixture(t) {
     export const closeConnection = () => {};
     export const chrome = { record, tabs: { create: async ({url}) => ({id:record('tab',url)}), remove:async () => {} } };
   `);
-  fs.writeFileSync(path.join(lib, 'cdp.js'), `export const evaluate = async tab => tab === 24101 ? '101' : process.env.SYSTEM_SECOND_UID || '202';`);
+  fs.writeFileSync(path.join(lib, 'cdp.js'), `export const evaluate = async tab =>
+    tab === 24101 ? (process.env.SYSTEM_PRIMARY_UID ?? '101') : (process.env.SYSTEM_SECOND_UID ?? '202');`);
   fs.writeFileSync(path.join(lib, 'publish.js'), `
-    export const ADAPTERS = {bilibili:{}};
+    export const ADAPTERS = {bilibili:{}, xhs:{}};
     export const preflight = async ids => {
       chrome.record('preflight', ids);
-      return Object.fromEntries(ids.map(id=>[id,{ok:true}]));
+      return Object.fromEntries(ids.map(id => [id, {
+        ok: !(id === 'bilibili' && process.env.SYSTEM_ADAPTER_OFFLINE === '1')
+      }]));
     };
+    export async function run(project, {platforms, onChange}) {
+      chrome.record('run', platforms);
+      for (const id of platforms) onChange({id, status:'已填写', logs:[], tabId:1});
+      return {};
+    }
   `);
   const cli = (args, extra = {}) => {
     fs.writeFileSync(settings, JSON.stringify(config));
@@ -145,4 +157,129 @@ test('invalid, disabled, or unsupported targets never fall back to opening multi
   refused(['doctor','--target',secondary,'--quiet']);
   f.config.disabled.push('bilibili');
   refused(['doctor','--target','bilibili','--quiet']);
+});
+
+function eveningFixture(t) {
+  const f = fixture(t);
+  const root = f.config.rootPath, project = path.join(root, 'tomorrow');
+  fs.mkdirSync(project);
+  f.config.bilibiliAccounts[0].enabled = false;
+  f.config.batches = [['bilibili', 'xhs']];
+  f.config.manual = ['bilibili', 'xhs'];
+  fs.writeFileSync(path.join(root, 'lib', 'bundle.js'),
+    'export const validate = () => ({errors:[], warnings:[]}), PLATFORMS = {}, len = s => s.length;');
+  fs.writeFileSync(path.join(root, 'clock.mjs'), `
+    import { mock } from 'node:test';
+    mock.timers.enable({apis:['Date'], now:Date.parse('2026-11-24T21:00:00+08:00')});
+  `);
+  const env = {TZ:'Asia/Shanghai', NODE_OPTIONS:'--import=./clock.mjs', HUB_NO_WEB:'1', SYSTEM_ONE_TICK:'1'};
+  const sql = fn => {
+    const db = new DatabaseSync(f.database);
+    try { return fn(db); } finally { db.close(); }
+  };
+  const plan = (platforms = {bilibili:{}}) => {
+    fs.writeFileSync(path.join(project, 'publish.json'), JSON.stringify({
+      id:'eve', name:'次日投稿', episode:1, schedule:'2026-11-25T09:00:00+08:00', platforms
+    }));
+    const r = f.cli(['plan', project], env);
+    assert.equal(r.status, 0, r.stderr);
+    sql(db => {
+      // Isolate the evening check from daily maintenance in the same daemon tick.
+      const day = new Date('2026-11-24T21:00:00+08:00').toLocaleDateString('zh-CN', {timeZone:'Asia/Shanghai'});
+      for (const key of ['doctorDay','metricsDay']) db.prepare('INSERT INTO meta(key,value) VALUES (?,?)').run(key,day);
+    });
+  };
+  const evening = extra => {
+    const r = f.cli(['daemon'], {...env, ...extra});
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /守护循环出错/);
+    return r;
+  };
+  const task = () => sql(db => db.prepare("SELECT state FROM tasks WHERE episode_id='eve' AND platform='bilibili'").get()?.state);
+  return {...f, project, plan, evening, task, sql};
+}
+
+test('evening checks the publishing primary when its account switch is off and the secondary is online', t => {
+  const f = eveningFixture(t);
+  f.plan();
+  assert.equal(f.task(), 'planned');
+  const routine = f.cli(['doctor','--quiet']);
+  assert.equal(routine.status, 0, routine.stderr);
+  assert.deepEqual(routine.events.filter(e => e[0] === 'preflight').map(e => e[1]), [24202]);
+
+  const eve = f.evening({SYSTEM_PRIMARY_UID:''});
+  assert.match(eve.stdout, /今晚先把这些平台登录好：B站 · 主号/);
+  assert.doesNotMatch(eve.stdout, /所有已检查的账号登录都正常/);
+  assert.ok(eve.events.some(([op,port]) => op === 'tab' && port === 24101));
+  assert.ok(eve.events.every(([,port]) => port !== 24202));
+  assert.equal(f.status('bilibili'), 'out');
+});
+
+test('evening checks the legacy primary with platform preflight even when both account rows are off', t => {
+  const f = eveningFixture(t);
+  delete f.config.bilibiliAccounts[0].uid;
+  f.config.bilibiliAccounts[1].enabled = false;
+  f.plan();
+  const eve = f.evening({SYSTEM_ADAPTER_OFFLINE:'1'});
+  assert.deepEqual(eve.events.filter(e => e[0] === 'preflight').map(e => [e[1],e[3]]), [[24101,['bilibili']]]);
+  assert.match(eve.stdout, /今晚先把这些平台登录好：B站 · 主号/);
+  assert.equal(f.status('bilibili'), 'out');
+});
+
+test('evening rejects a different primary UID recorded in SQLite', t => {
+  const f = eveningFixture(t);
+  delete f.config.bilibiliAccounts[0].uid;
+  f.plan();
+  f.sql(db => db.prepare('INSERT INTO account_traffic_identity(platform,uid) VALUES (?,?)').run('bilibili','303'));
+  const eve = f.evening(); // Primary Chrome is logged in as UID 101.
+  assert.match(eve.stdout, /登录 UID 与账号绑定不一致/);
+  assert.match(eve.stdout, /今晚先把这些平台登录好：B站 · 主号/);
+  assert.equal(f.status('bilibili'), 'out');
+});
+
+test('evening uses current platform settings when Bilibili was disabled after planning', t => {
+  const f = eveningFixture(t);
+  f.config.disabled = f.config.disabled.filter(id => id !== 'xhs');
+  f.plan({bilibili:{}, xhs:{}});
+  assert.equal(f.task(), 'planned');
+  f.config.disabled.push('bilibili');
+  const eve = f.evening();
+  assert.deepEqual(eve.events.filter(e => e[0] === 'preflight').map(e => e[3]), [['xhs']]);
+  assert.match(eve.stdout, /所有已检查的账号登录都正常/);
+  assert.equal(f.status('bilibili'), undefined);
+  const run = f.cli(['run', f.project, '--only', 'bilibili']);
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(f.task(), 'skipped');
+  assert.deepEqual(run.events, []);
+});
+
+test('evening skips Bilibili for an episode that only plans another platform', t => {
+  const f = eveningFixture(t);
+  f.config.disabled = f.config.disabled.filter(id => id !== 'xhs');
+  f.plan({bilibili:{skip:true}, xhs:{}});
+  assert.equal(f.task(), 'skipped');
+  const eve = f.evening();
+  assert.deepEqual(eve.events.filter(e => e[0] === 'preflight').map(e => [e[1],e[3]]), [[24101,['xhs']]]);
+  assert.equal(f.status(secondary), undefined);
+});
+
+test('evening sends no success notification when the only planned platform has since been disabled', t => {
+  const f = eveningFixture(t);
+  f.plan();
+  f.config.disabled.push('bilibili');
+  const eve = f.evening();
+  assert.deepEqual(eve.events, []);
+  assert.doesNotMatch(eve.stdout, /明天 .* 发布/);
+  // Allow the check to run if the platform is re-enabled during the same evening.
+  assert.equal(f.sql(db => db.prepare("SELECT value FROM meta WHERE key='eve:eve'").get()), undefined);
+});
+
+test('run still fills Bilibili on the primary profile with its account switch off', t => {
+  const f = eveningFixture(t);
+  f.plan();
+  const run = f.cli(['run', f.project, '--only', 'bilibili']);
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(run.events.filter(e => ['preflight','run'].includes(e[0])).map(e => [e[0],e[1],e[3]]),
+    [['preflight',24101,['bilibili']], ['run',24101,['bilibili']]]);
+  assert.equal(f.task(), 'awaiting_user');
 });
