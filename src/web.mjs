@@ -19,7 +19,7 @@ const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
-const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
+const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'threads', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 const platformList = () => PLATFORMS.filter(id => id !== 'zsz' || !SITE?.salesOnly).map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
 
@@ -96,7 +96,7 @@ function widgetScript(req, file) {
 const latestPublished = () => episodes().filter(e => e.schedule && Date.parse(e.schedule) <= Date.now()).sort((a, b) => Date.parse(b.schedule) - Date.parse(a.schedule))[0];
 // 手机小组件：只读汇总（粉丝、涨幅、最新一期播放、站点近 7 天），用单独的 config.web.widgetToken，只能读这一个接口
 function widgetData() {
-  const ORDER = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram'];
+  const ORDER = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'threads'];
   const rows = db.prepare("SELECT day, platform, total FROM followers WHERE day >= date('now','localtime','-40 day') AND total IS NOT NULL ORDER BY day").all();
   const by = {}; for (const r of rows) (by[r.platform] ||= []).push(r);
   const today = new Date().toLocaleDateString('sv-SE');

@@ -53,6 +53,17 @@ export const followerCollectors = {
     }, { wait: 6000 });
     const total = num(n); return total != null && { total, history: [] };
   },
+  async threads() {   // 读自己主页上的「×× 位粉丝」：左侧栏「个人主页」→ /@用户名
+    const n = await withTab('https://www.threads.com/', async (t) => {
+      let u = null;
+      for (let i = 0; i < 8 && !u; i++) { await sleep(2000); u = await evaluate(t, `(()=>{const a=[...document.querySelectorAll('a[href^="/@"]')].find(a=>/个人主页|Profile/.test((a.getAttribute('aria-label')||'')+a.innerText)||a.getBoundingClientRect().x<120);return a?a.getAttribute('href').split('/').slice(0,2).join('/'):null})()`).catch(() => null); }
+      if (!u) return null;
+      await evaluate(t, `(location.href=${JSON.stringify(u)},1)`);
+      for (let i = 0; i < 8; i++) { await sleep(2500); const v = await evaluate(t, `(document.body.innerText.match(/([\\d,.]+\\s*[万KM]?)\\s*(?:位粉丝|粉丝|followers)/i)||[])[1]||''`).catch(() => ''); if (v) return v; }
+      return null;
+    }, { wait: 6000 });
+    const total = num(n); return total != null && { total, history: [] };
+  },
   async zsz() {   // 知识站的「粉丝」= 注册用户
     if (!SITE || SITE.salesOnly) return null;
     const r = await withTab(SITE.admin, (t) => evaluate(t, `${get(SITE.dashboardApi)}.then(x=>({total:x.funnel.totalRegistered,trend:x.registrationTrend||[]}))`));
