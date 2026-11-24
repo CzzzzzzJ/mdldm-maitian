@@ -1,8 +1,8 @@
-// 单期复盘（发布后第 1/3/7 天）和周报：只用麦田自己攒的数据（流量采样、每日流量、粉丝、站点）
+// 单期复盘（发布后第 1/3/7 天）和周报：只用 howieip-studio 自己攒的数据（流量采样、每日流量、粉丝、站点）
 import { db, episodes, getTasks, NAMES } from './db.mjs';
-import { SITE } from './site.mjs';
+import { getSite } from './site.mjs';
 
-const PL = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'zsz'];
+const PL = ['bilibili', 'douyin', 'xhs', 'channels', 'mp', 'youtube', 'x', 'instagram', 'discord', 'zsz'];
 const DAY = 864e5;
 const fmt = (n) => n == null ? '–' : Math.round(n).toLocaleString('en-US');
 const pct = (a, b, d = 1) => b ? (a / b * 100).toFixed(d) + '%' : '–';
@@ -22,7 +22,7 @@ function at(eid, p, t) {
   return r ? { views: r.views || 0, likes: r.likes || 0, comments: r.comments || 0, favorites: r.favorites || 0, shares: r.shares || 0 } : null;
 }
 const inter = (m) => m ? m.likes + m.comments + m.favorites + m.shares : 0;
-// 有没有这一期在这个年龄附近的真实数据（麦田上线前的期没有，不能硬比）
+// 有没有这一期在这个年龄附近的真实数据（howieip-studio 上线前的期没有，不能硬比）
 const hasDataBy = (eid, t) => !!db.prepare('SELECT 1 FROM metrics WHERE episode_id=? AND day<=? LIMIT 1').get(eid, dayOf(t));
 
 function snapshot(ep, ageDays) {
@@ -51,7 +51,7 @@ export function review(ep, ageDays) {
   const pv = prev ? snapshot(prev, ageDays) : null;
   const fans = fansGain(pubAt(ep), cur.t);
   const camp = campaignOf(ep), conv = camp && db.prepare('SELECT * FROM site_campaigns WHERE campaign=?').get(camp);
-  const site = SITE ? siteSum(pubAt(ep), cur.t) : null;
+  const site = getSite() ? siteSum(pubAt(ep), cur.t) : null;
   return { ep: { id: ep.id, episode: ep.episode, name: ep.name, nick: nickOf(ep) }, ageDays, cur, prev: prev && { id: prev.id, nick: nickOf(prev), ...pv }, fans, conv, site };
 }
 
@@ -75,7 +75,7 @@ export function reviewText(r) {
   if (best) L.push(`结论：播放主要来自 ${NAMES[best.p]}${bestRate && bestRate.p !== best.p ? `，互动最好的是 ${NAMES[bestRate.p]}（${pct(inter(bestRate.m), bestRate.m.views)}）` : ''}。`);
   if (Object.keys(fans.out).length) L.push(`发布后各平台涨粉 ${fans.sum >= 0 ? '+' : ''}${fmt(fans.sum)}（${Object.entries(fans.out).sort((a, b) => b[1] - a[1]).map(([p, v]) => `${NAMES[p]} ${v >= 0 ? '+' : ''}${fmt(v)}`).join('、')}）`);
   if (conv) L.push(`转化（按期归因）：注册 ${fmt(conv.reg)}｜会员 ${fmt(conv.vip)}｜订单 ${fmt(conv.orders)}｜收入 ¥${fmt(conv.revenue)}`);
-  else if (site && site.reg != null) L.push(`${SITE.name}同期：新注册 ${fmt(site.reg)}｜新会员 ${fmt(site.vip)}｜收入 ¥${fmt(site.revenue)}（站点还没按期记录来源，这是同期总数）`);
+  else if (site && site.reg != null) L.push(`${(getSite() || {}).name || '知识站'}同期：新注册 ${fmt(site.reg)}｜新会员 ${fmt(site.vip)}｜收入 ¥${fmt(site.revenue)}（站点还没按期记录来源，这是同期总数）`);
   return L.join('\n');
 }
 
@@ -97,14 +97,14 @@ export function weekly(now = Date.now()) {
   const cur = gain(from, to), prv = gain(pFrom, pTo);
   const pubs = episodes().filter(e => pubAt(e) >= from && pubAt(e) <= to).sort((a, b) => pubAt(a) - pubAt(b));
   const fans = fansGain(from, to), fansP = fansGain(pFrom, pTo);
-  const site = SITE ? siteSum(from, to) : null, siteP = SITE ? siteSum(pFrom, pTo) : null;
+  const siteOn = getSite(), site = siteOn ? siteSum(from, to) : null, siteP = siteOn ? siteSum(pFrom, pTo) : null;
   const vs = (a, b) => b ? `（上周 ${fmt(b)}，${a >= b ? '+' : ''}${pct(a - b, b, 0)}）` : '';
-  const L = [`🗓 麦田周报｜${dayOf(from).slice(5)} ～ ${dayOf(to).slice(5)}`];
+  const L = [`🗓 howieip-studio 周报｜${dayOf(from).slice(5)} ～ ${dayOf(to).slice(5)}`];
   L.push(`发了 ${pubs.length} 期${pubs.length ? '：' + pubs.map(e => `「${nickOf(e)}」`).join('、') : ''}`);
   const hasM = db.prepare('SELECT 1 FROM metrics WHERE day>=? AND day<=? LIMIT 1').get(dayOf(from), dayOf(to));
-  L.push(hasM ? `全平台新增播放 ${fmt(cur.sum)}${vs(cur.sum, prv.sum)}` : '这一周麦田还没有流量数据（从接入麦田那天起才有）');
+  L.push(hasM ? `全平台新增播放 ${fmt(cur.sum)}${vs(cur.sum, prv.sum)}` : '这一周 howieip-studio 还没有流量数据（从接入 howieip-studio 那天起才有）');
   L.push(`各平台涨粉 ${fans.sum >= 0 ? '+' : ''}${fmt(fans.sum)}${vs(fans.sum, fansP.sum)}`);
-  if (site && site.reg != null) L.push(`${SITE.name}：新注册 ${fmt(site.reg)}${vs(site.reg, siteP && siteP.reg)}｜新会员 ${fmt(site.vip)}｜收入 ¥${fmt(site.revenue)}`);
+  if (site && site.reg != null) L.push(`${siteOn.name}：新注册 ${fmt(site.reg)}${vs(site.reg, siteP && siteP.reg)}｜新会员 ${fmt(site.vip)}｜收入 ¥${fmt(site.revenue)}`);
   L.push('');
   for (const [p, v] of Object.entries(cur.per).sort((a, b) => b[1] - a[1])) L.push(`${NAMES[p]}：新增播放 ${fmt(v)}${fans.out[p] != null ? `｜涨粉 ${fans.out[p] >= 0 ? '+' : ''}${fmt(fans.out[p])}` : ''}`);
   if (cur.byEp[0]) { L.push(''); L.push(`这周最能打：「${nickOf(cur.byEp[0].e)}」新增 ${fmt(cur.byEp[0].es)} 播放`); }

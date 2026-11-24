@@ -1,6 +1,6 @@
 // 流量采集：只读自己创作者后台的数据，每天一次。按作品 ID 匹配（标题在平台上可能改过）。
 import { evaluate, withTab, sleep } from './driver.mjs';
-import { SITE } from './site.mjs';
+import { getSite } from './site.mjs';
 
 const J = JSON.stringify;
 // "1.2万" "6,017" "5.3K" → 数字
@@ -68,8 +68,32 @@ export const collectors = {
       return it?{views:it.play_count??it.ig_play_count,likes:it.like_count,comments:it.comment_count,shares:it.reshare_count}:null})()`), { wait: 6000 });
     return m && { views: m.views ?? null, likes: m.likes ?? null, comments: m.comments ?? null, shares: m.shares ?? null };
   },
+  async mp({ p }) {   // 发表记录里这篇的阅读记成播放
+    const card = await withTab('https://mp.weixin.qq.com/cgi-bin/appmsgpublish?sub=list&begin=0&count=10', async (t) => {
+      for (let i = 0; i < 8; i++) {
+        await sleep(1500);
+        const hit = await evaluate(t, `(()=>{
+          const text = document.body.innerText || '';
+          if (/登录超时|请重新登录|微信扫一扫，选择公众平台账号登录/.test(text)) return { out: true };
+          const el = [...document.querySelectorAll('a, [class*=title]')].find(e => (e.innerText || '').trim().startsWith(${J(p.title)}));
+          if (!el) return null;
+          let card = el;
+          for (let k = 0; k < 8 && card.parentElement; k++) { card = card.parentElement; if (/阅读/.test(card.innerText) && card.innerText.length < 900) break; }
+          return { text: card.innerText };
+        })()`);
+        if (hit) return hit;
+      }
+      return null;
+    }, { wait: 4000 });
+    if (!card || card.out) return null;
+    const g = (label) => num((card.text.match(new RegExp(label + '\\s*([\\d,.]+\\s*[万]?)')) || [])[1]);
+    const views = g('阅读');
+    if (views == null) return null;
+    return { views, likes: g('点赞') ?? g('喜欢'), comments: g('留言'), favorites: g('收藏'), shares: g('分享') };
+  },
   async zsz({ url, p }) {
     const id = idOf(url, /courseId=(\w+)/);
+    const SITE = getSite();
     if (!SITE) return null;
     const c = await withTab(SITE.admin, (t) => evaluate(t, `fetch(${J(SITE.coursesApi)},{credentials:'include'}).then(r=>r.json()).then(x=>{const c=(x.courses||[]).find(c=>c._id===${J(id)}||c.title===${J(p.title)});return c?{views:c.viewCount||0}:null})`));
     return c && { views: c.views };

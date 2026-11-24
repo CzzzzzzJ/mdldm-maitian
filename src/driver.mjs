@@ -1,4 +1,4 @@
-// 驱动选择：direct = 中控直连专用 Chrome（默认）；plugin = 通过插件面板的开发桥
+// 驱动选择：direct = 中控直连egolite（默认）；plugin = 通过插件面板的开发桥
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { config } from './feishu.mjs';
@@ -26,7 +26,7 @@ export async function click(tabId, expr) {
   return (await load()).cdp.click(tabId, expr);
 }
 // 认领已开着的页面（hub submit 用）；插件方式不支持
-export async function adoptTabs(re) { if (mode === 'plugin') throw new Error('插件方式不支持认领页面，请用专用 Chrome（driver: direct）'); return (await load()).shim.adoptTargets(re); }
+export async function adoptTabs(re) { if (mode === 'plugin') throw new Error('插件方式不支持认领页面，请用egolite（driver: direct）'); return (await load()).shim.adoptTargets(re); }
 export async function withTab(url, fn, { wait = 8000 } = {}) {
   if (mode === 'plugin') return bridge.withTab(url, fn, { wait });
   await load(); const t = await chrome.tabs.create({ url, active: false });
@@ -36,7 +36,7 @@ export async function busy() { if (mode !== 'plugin') return false; const j = aw
 
 // 商店里的插件版本还没有某个平台的适配器（比如新平台刚加、商店还在审核）：这几个平台先跳过并说明
 const split = (pub, ids) => [ids.filter(id => pub.ADAPTERS[id]), ids.filter(id => !pub.ADAPTERS[id])];
-const tooOld = (id) => { const p = pluginInfo(); return `麦田发布助手 ${p.version || ''}（${p.source === 'store' ? '商店版' : '本地'}）还不支持 ${id}，等插件更新`; };
+const tooOld = (id) => { const p = pluginInfo(); return `howieip-studio 发布助手 ${p.version || ''}（${p.source === 'store' ? '商店版' : '本地'}）还不支持 ${id}，等插件更新`; };
 
 // 跑一批平台；onState(st) 在每次状态变化时调用，st = {id, status, logs, tabId}
 export async function runBatch(project, batch, onState, onStall) {
@@ -72,7 +72,7 @@ export async function links(project, ids) {
   if (mode === 'plugin') { const r = await bridge.panel('links', [project, ids], 600000); if (!r || !r.ok) throw new Error(r ? r.error : '没有响应'); return r.result; }
   return (await load()).pub.collectLinks(project, ids, {});
 }
-// 登录不需要插件代码：只开专用 Chrome 和页面（第一次还没装插件时也能用）
+// 登录不需要插件代码：只开egolite 和页面（第一次还没装插件时也能用）
 export async function openForLogin(urls) { const shim = await import('./chrome-shim.mjs'); await shim.launchChrome({ foreground: true }); for (const u of urls) await shim.chrome.tabs.create({ url: u, active: true }); }
 export async function close() { if (lib) lib.shim.closeConnection(); }
 // 页面截图（存档用），返回 JPEG Buffer

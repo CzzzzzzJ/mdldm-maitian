@@ -1,6 +1,6 @@
 // 发布前查重、填写后回读、自动提交。每个函数都失败即停，不硬来。
 import { evaluate, withTab, sleep, click } from './driver.mjs';
-import { SITE } from './site.mjs';
+import { getSite } from './site.mjs';
 
 const firstLine = (t) => t.split('\n')[0].trim();
 
@@ -63,6 +63,18 @@ export async function ytRows(title) {
   }, { wait: 9000 });
 }
 
+// YouTube 帖子：内容页的 Posts 里已有同标题就不再填。选择器对不上就当没找到，不拦这次填写。
+export async function ytPostExisting(title) {
+  return withTab('https://studio.youtube.com/', async (id) => {
+    const url = await evaluate(id, `location.href`);
+    const m = url.match(/channel\/([^/?]+)/); if (!m) return null;
+    await evaluate(id, `(location.href='https://studio.youtube.com/channel/${m[1]}/posts',1)`);
+    await sleep(5000);
+    const hit = await evaluate(id, `[...document.querySelectorAll('ytcp-post-row, ytcp-social-post-row')].some(r=>(r.innerText||'').includes(${JSON.stringify(title)}))`);
+    return hit ? { detail: 'Posts 里已经有同标题，没有再填写' } : null;
+  }, { wait: 9000 });
+}
+
 // YouTube：上传对话框还开着、定时回读一致时，点一次「预定」
 export async function ytSubmit(tabId, title, scheduleIso) {
   const D = `document.querySelector('ytcp-uploads-dialog')`;
@@ -85,7 +97,7 @@ export async function ytSubmit(tabId, title, scheduleIso) {
   await sleep(8000);
   const text = await evaluate(tabId, `document.body.innerText`).catch(() => '');
   const link = (text.match(/https:\/\/youtu\.be\/[\w-]+/) || [''])[0];
-  // Studio 列表刷新慢：点完常常还显示「待处理」（2026-11-15 麦田开源这期），每 30 秒查一次，最多 3 分钟
+  // Studio 列表刷新慢：点完常常还显示「待处理」（2026-11-15 howieip-studio 开源这期），每 30 秒查一次，最多 3 分钟
   let rows = null;
   for (let i = 0; i < 7; i++) {
     if (i) await sleep(30000);
@@ -98,8 +110,35 @@ export async function ytSubmit(tabId, title, scheduleIso) {
 
 // 知识站：同标题课程数量和状态
 export async function zszCourses(title) {
+  const SITE = getSite();
   if (!SITE) return [];
   return withTab(SITE.admin, (id) => evaluate(id, `fetch(${JSON.stringify(SITE.coursesApi)},{credentials:'include'}).then(r=>r.json()).then(d=>(d.courses||[]).filter(c=>c.title===${JSON.stringify(title)}).map(c=>({id:c._id,vis:c.visibilityStatus,seriesId:c.seriesId})))`));
+}
+
+// 服务号：发表记录和草稿箱里有没有同标题。没登录就抛错，调用方决定要不要继续
+const MP_LISTS = [
+  ['https://mp.weixin.qq.com/cgi-bin/appmsgpublish?sub=list&begin=0&count=10', '发表'],
+  ['https://mp.weixin.qq.com/cgi-bin/appmsg?begin=0&count=10&type=77&action=list_card', '草稿'],
+];
+export async function mpExisting(title) {
+  for (const [url, kind] of MP_LISTS) {
+    const hit = await withTab(url, async (id) => {
+      let text = '';
+      for (let i = 0; i < 8; i++) {
+        await sleep(1500);
+        text = await evaluate(id, `document.body.innerText || ''`);
+        if (/登录超时|请重新登录|微信扫一扫，选择公众平台账号登录/.test(text)) throw new Error('服务号没有登录');
+        if (text.includes(title) || /发表记录|草稿|已发表|暂无/.test(text)) break;
+      }
+      if (!text.includes(title)) return null;
+      const link = await evaluate(id, `(()=>{const a=[...document.querySelectorAll('a')].find(a=>/mp\\.weixin\\.qq\\.com\\/s\\//.test(a.href)&&(a.innerText||'').includes(${JSON.stringify(title)}));return a?a.href:''})()`);
+      return { kind, url: link || '' };
+    }, { wait: 3000 });
+    if (!hit) continue;
+    if (hit.kind === '发表') return { state: 'published', detail: '发表记录里已有同标题', url: hit.url };
+    return { state: 'awaiting_user', detail: '草稿箱里已有同标题，没有再新建' };
+  }
+  return null;
 }
 
 // 抖音：真正识别成话题的个数
@@ -111,7 +150,7 @@ const IG_USER = `(()=>{const i=[...document.querySelectorAll('a[href] img[alt]')
 const igHead = (caption) => [...firstLine(caption)].slice(0, 30).join('');
 
 // Instagram：定时内容页（/scheduled_content/，按周显示）里有没有这一期。从本周往后翻到定时所在那周
-// 定时中的 Reels 不在主页列表里（2026-11-15 麦田开源这期发现），查重必须先看这里
+// 定时中的 Reels 不在主页列表里（2026-11-15 howieip-studio 开源这期发现），查重必须先看这里
 export async function igScheduled(caption, scheduleIso) {
   const head = igHead(caption);
   const weeks = scheduleIso ? Math.max(0, Math.ceil((Date.parse(scheduleIso) - Date.now()) / (7 * 86400e3))) + 1 : 2;
@@ -128,7 +167,7 @@ export async function igScheduled(caption, scheduleIso) {
 }
 
 // Instagram：先看定时内容，再看自己主页 Reels 列表（逐条打开最近几条，配文第一行对得上就算）
-export async function igExisting(caption, scheduleIso) {
+export async function igExisting(caption, scheduleIso, posts = false) {
   const head = igHead(caption);
   const sch = await igScheduled(caption, scheduleIso).catch(() => null);
   if (sch) return sch;
@@ -136,9 +175,12 @@ export async function igExisting(caption, scheduleIso) {
     let u = null;
     for (let i = 0; i < 10 && !u; i++) { u = await evaluate(id, IG_USER).catch(() => null); if (!u) await sleep(2000); }
     if (!u) throw new Error('Instagram 没登录或页面没打开');
-    await evaluate(id, `(location.href='/${u}/reels/',1)`);
+    const path = posts ? `/${u}/` : `/${u}/reels/`;
+    const mark = posts ? '/p/' : '/reel/';
+    const slot = posts ? 'p' : 'reel';
+    await evaluate(id, `(location.href=${JSON.stringify(path)},1)`);
     let hrefs = [];
-    for (let i = 0; i < 10 && !hrefs.length; i++) { await sleep(2500); hrefs = await evaluate(id, `[...new Set([...document.querySelectorAll('a[href*="/reel/"]')].map(a=>a.getAttribute('href').replace(/^.*?(\\/reel\\/[^/]+\\/).*$/,'$1')))].slice(0,4)`).catch(() => []); }
+    for (let i = 0; i < 10 && !hrefs.length; i++) { await sleep(2500); hrefs = await evaluate(id, `[...new Set([...document.querySelectorAll('a[href*="${mark}"]')].map(a=>a.getAttribute('href').replace(/^.*?(\\/${slot}\\/[^/]+\\/).*$/,'$1')))].slice(0,4)`).catch(() => []); }
     for (const h of hrefs) {
       await evaluate(id, `(location.href='${h}',1)`);
       for (let i = 0; i < 8; i++) {

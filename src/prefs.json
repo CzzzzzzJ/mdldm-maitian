@@ -1,0 +1,41 @@
+{
+  "platforms": [
+    { "id": "bilibili", "name": "B站" },
+    { "id": "xhs", "name": "小红书" },
+    { "id": "douyin", "name": "抖音" },
+    { "id": "channels", "name": "视频号" },
+    { "id": "mp", "name": "服务号" },
+    { "id": "youtube", "name": "YouTube" },
+    { "id": "x", "name": "X" },
+    { "id": "instagram", "name": "Instagram" },
+    { "id": "discord", "name": "Discord" },
+    { "id": "zsz", "name": "知识站" }
+  ],
+  "defaults": {
+    "manual": ["bilibili", "douyin", "xhs", "channels", "mp", "discord"],
+    "keepAlive": ["channels", "mp"],
+    "keepAliveMinutes": 60,
+    "sampleHours": 6
+  },
+  "limits": {
+    "owner": 40,
+    "keepAliveMinutes": [5, 1440],
+    "sampleHours": [1, 48],
+    "imageBytes": 2097152
+  },
+  "siteFields": [
+    { "key": "name", "label": "名称", "placeholder": "知识站" },
+    { "key": "base", "label": "地址", "placeholder": "https://example.com" },
+    { "key": "adminPath", "label": "管理后台路径", "placeholder": "/admin" },
+    { "key": "coursesApi", "label": "课程列表接口", "placeholder": "/api/courses?admin=1" },
+    { "key": "dashboardApi", "label": "数据汇总接口", "placeholder": "/api/admin/dashboard" },
+    { "key": "coursePath", "label": "课程页路径", "placeholder": "/series/{seriesId}?courseId={id}" }
+  ],
+  "siteDefaults": {
+    "name": "知识站",
+    "adminPath": "/admin",
+    "coursesApi": "/api/courses?admin=1",
+    "dashboardApi": "/api/admin/dashboard",
+    "coursePath": "/series/{seriesId}?courseId={id}"
+  }
+}

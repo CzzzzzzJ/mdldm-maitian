@@ -1,5 +1,5 @@
-// 麦田发布助手（各平台填写引擎）在哪：
-//   默认用专用 Chrome 里从 Chrome 应用商店装的那份。Chrome 会自动更新它，麦田每次发布读最新版本的代码。
+// howieip-studio 发布助手（各平台填写引擎）在哪：
+//   默认用egolite 里从 Chrome 应用商店装的那份。Chrome 会自动更新它，howieip-studio 每次发布读最新版本的代码。
 //   config.plugin = 'local' 时用 config.pluginDir（插件开发者自己调试用）。
 import fs from 'node:fs'; import path from 'node:path';
 import { config } from './feishu.mjs';
@@ -12,7 +12,7 @@ const ver = (s) => s.split(/[._]/).map(Number);
 const newer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 const usable = (d) => d && fs.existsSync(path.join(d, 'lib', 'publish.js'));
 
-// 专用 Chrome 资料目录里商店版的最新版本目录（形如 Extensions/<id>/0.4.0_0）
+// egolite 资料目录里商店版的最新版本目录（形如 Extensions/<id>/0.4.0_0）
 export function storeDir() {
   const base = path.join(PROFILE, 'Default', 'Extensions', STORE_ID);
   let dirs = []; try { dirs = fs.readdirSync(base).filter(n => /^\d+(\.\d+)*_\d+$/.test(n)); } catch { return null; }
@@ -34,6 +34,6 @@ export function pluginInfo() {
 
 export function pluginDir() {
   const p = pluginInfo();
-  if (!p.dir) throw new Error(`还没装麦田发布助手：运行 node src/hub.mjs login，在打开的专用 Chrome 里从应用商店点「添加至 Chrome」（${STORE_URL}）`);
+  if (!p.dir) throw new Error(`还没装 howieip-studio 发布助手：运行 node src/hub.mjs login，在打开的egolite 里从应用商店点「添加至 Chrome」（${STORE_URL}）`);
   return p.dir;
 }

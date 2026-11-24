@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 发布中控：分批发布、状态落盘、防重、飞书通知、自动取链接
-//   hub login                                   打开专用 Chrome 和各平台页面，供你登录
-//   hub doctor                                  演练：检查 7 个平台登录态和上传页结构（不上传、不填写）
+//   hub login                                   打开egolite 和各平台页面，供你登录
+//   hub doctor                                  演练：检查各平台登录态和上传页结构（不上传、不填写）
 //   hub run <工程目录> [--only a,b] [--force]   发起（或续跑）一期
 //   hub status [id] [--logs]                    看状态
 //   hub sync <id> [--only a,b]                  取链接、更新状态，写回发布记录
@@ -18,18 +18,19 @@ const board = (o) => boardSync(o).then((r) => { if (r) console.log('看板已同
 import { config, notify } from './feishu.mjs';
 import { collectFollowers } from './followers.mjs';
 import * as drv from './driver.mjs';
-import { SITE } from './site.mjs';
+import { getSite } from './site.mjs';
+import { platformIds } from './prefs.mjs';
 import { learnOn, learnUrl, GROUP_URL } from './learn.mjs';
 import { validateProject } from './validate.mjs';
 import { STORE_URL, pluginInfo } from './plugin.mjs';
-import { xExisting, xSubmit, ytRows, ytSubmit, zszCourses, douyinTopics, igExisting, igSubmit } from './checks.mjs';
+import { xExisting, xSubmit, ytRows, ytPostExisting, ytSubmit, zszCourses, douyinTopics, igExisting, igSubmit, mpExisting } from './checks.mjs';
 // 出错时附一次交流群和教程入口；每天最多一次，不刷屏（config.learnLinks = false 关掉）
 function helpTip() {
   if (!learnOn(config)) return '';
   const day = new Date().toLocaleDateString('sv-SE');
   if (getMeta('learnTipDay') === day) return '';
   setMeta('learnTipDay', day);
-  return `\n\n💡 平台改版或卡住了：交流群和踩坑手册 ${GROUP_URL} ；完整教程 ${learnUrl('maitian-error')}`;
+  return `\n\n💡 平台改版或卡住了：交流群和踩坑手册 ${GROUP_URL} ；完整教程 ${learnUrl('howieip-studio-error')}`;
 }
 
 const args = process.argv.slice(2), cmd = args[0];
@@ -39,8 +40,9 @@ const strip = (s) => String(s || '').replace(/ *\d+%/, '');
 const mapState = (s) => s === '待你发布' || s === '已填写' ? 'filled' : s === '异常' || s === '上传超时' ? 'failed' : s === '未登录' ? 'not_logged_in' : s === '已停止' ? 'stopped' : s === '跳过' ? 'skipped' : 'running';
 const loadProject = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8'));
 const projectOf = (ep, pj) => ({ dir: path.relative(config.rootPath, ep.dir), data: pj });
-const ALL = ['bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram', 'zsz'].filter(id => id !== 'zsz' || SITE);   // 没配自有站点就不管 zsz
-const LOGIN_PAGES = { bilibili: 'https://member.bilibili.com/platform/upload/video/frame', xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video', douyin: 'https://creator.douyin.com/creator-micro/content/upload', channels: 'https://channels.weixin.qq.com/platform/post/create', youtube: 'https://studio.youtube.com/', x: 'https://x.com/home', instagram: 'https://www.instagram.com/', zsz: SITE ? SITE.admin : '' };
+const LOGIN_PAGES = { bilibili: 'https://member.bilibili.com/platform/upload/video/frame', xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video', douyin: 'https://creator.douyin.com/creator-micro/content/upload', channels: 'https://channels.weixin.qq.com/platform/post/create', mp: 'https://mp.weixin.qq.com/', youtube: 'https://studio.youtube.com/', x: 'https://x.com/home', instagram: 'https://www.instagram.com/', discord: 'https://discord.com/app' };
+const allPlatforms = () => platformIds().filter(id => id !== 'zsz' || getSite());   // 没配自有站点就不管 zsz。名单在 src/prefs.json
+const loginPage = (id) => id === 'zsz' ? (getSite()?.admin || '') : (LOGIN_PAGES[id] || '');
 
 function table(eid) {
   return getTasks(eid).map(t => `${NAMES[t.platform] || t.platform}：${STATE_CN[t.state] || t.state}${t.detail ? `（${t.detail.slice(0, 80)}）` : ''}${t.url ? ` ${t.url}` : ''}`).join('\n');
@@ -73,13 +75,19 @@ async function after(ep, pj, id, res) {
       const got = await douyinTopics(res.tabId).catch(() => []);
       if (got.length !== (p.topics || []).length) { setTask(ep.id, id, 'awaiting_user', `话题只识别了 ${got.length}/${p.topics.length} 个，发之前请补`); return; }
     }
-    if (config.manual.includes(id)) { setTask(ep.id, id, 'awaiting_user', pj.schedule ? '已设定时，核对后点「定时发布」' : '核对后点发布'); return; }
+    if (id === 'discord' || config.manual.includes(id)) {
+      const detail = id === 'discord' ? '已填进发言框，核对后自己点发送。关掉页面内容会丢' : id === 'mp' ? '核对后点「发表」，不要点群发' : (pj.schedule ? '已设定时，核对后点「定时发布」' : '核对后点发布');
+      setTask(ep.id, id, 'awaiting_user', detail);
+      return;
+    }
+    if ((id === 'x' || id === 'youtube' || id === 'zsz') && p.mode === 'article') { setTask(ep.id, id, 'awaiting_user', '已填写，核对后自己点发布'); return; }
     if (id === 'zsz') {
       const cs = await zszCourses(p.title);
-      if (cs.length === 1) setTask(ep.id, id, cs[0].vis === 'published' ? 'published' : 'scheduled', cs[0].vis === 'published' ? '已上线' : '转码中，完成后自动上线', { url: SITE.courseUrl(cs[0]) });
+      if (cs.length === 1) setTask(ep.id, id, cs[0].vis === 'published' ? 'published' : 'scheduled', cs[0].vis === 'published' ? '已上线' : '转码中，完成后自动上线', { url: getSite()?.courseUrl(cs[0]) || '' });
       else { setTask(ep.id, id, 'failed', `后台同名课程有 ${cs.length} 节`); await notify(`❌ ${ep.name}\n知识站：同名课程 ${cs.length} 节，请检查`); }
       return;
     }
+    if (!['x', 'instagram', 'youtube'].includes(id)) { setTask(ep.id, id, 'awaiting_user', '已填写，核对后自己点发布'); return; }
     const r = id === 'x' ? await xSubmit(res.tabId, p.text, pj.schedule) : id === 'instagram' ? await igSubmit(res.tabId, p.caption, pj.schedule) : await ytSubmit(res.tabId, p.title, pj.schedule);
     log(ep.id, id, 'submit', JSON.stringify(r));
     if (r.ok) setTask(ep.id, id, r.state, r.detail || '', { url: r.url });
@@ -87,7 +95,7 @@ async function after(ep, pj, id, res) {
   } catch (e) { setTask(ep.id, id, 'awaiting_user', `自动步骤出错：${e.message}`); await notify(`⚠️ ${ep.name}\n${NAMES[id]} 自动步骤出错：${e.message}`); }
 }
 
-// hub submit <id> <平台>：中控卡住时，把专用 Chrome 里已经填好的发帖页单独提交一次（只限 X / YouTube / Instagram）
+// hub submit <id> <平台>：中控卡住时，把egolite 里已经填好的发帖页单独提交一次（只限 X / YouTube / Instagram）
 // 先查重，页面必须恰好一个，然后走和自动流程一样的 after()：存档截图 → 核对 → 点一次 → 记状态
 const SUBMIT_PAGES = {
   instagram: [/instagram\.com/, `!!document.querySelector('[role=dialog] [contenteditable=true]')`],
@@ -104,12 +112,12 @@ async function submitOne() {
   const t = getTask(ep.id, id);
   if (t && ['scheduled', 'published'].includes(t.state)) throw refuse(`${NAMES[id]} 已经是「${STATE_CN[t.state]}」，不再提交`);
   await drv.ensure();
-  if (id === 'instagram' && await igExisting(p.caption, pj.schedule).catch(() => null)) throw refuse('Instagram 上已经有这一期（定时内容或主页），不再提交');
+  if (id === 'instagram' && await igExisting(p.caption, pj.schedule, p.mode === 'images').catch(() => null)) throw refuse('Instagram 上已经有这一期（定时内容或主页），不再提交');
   if (id === 'x' && await xExisting(p.text).catch(() => null)) throw refuse('X 上已经有这条，不再提交');
   if (id === 'youtube') { const rows = await ytRows(p.title).catch(() => null); if (rows && (rows.length > 1 || rows.some(r => !/草稿|待处理|上传|处理中/.test(r)))) throw refuse(`YouTube Studio 里已有：${rows.join('；')}，不再提交`); }
   const [re, ready] = SUBMIT_PAGES[id], cands = [];
   for (const tab of await drv.adoptTabs(re)) if (await drv.evaluate(tab, ready).catch(() => false)) cands.push(tab);
-  if (cands.length !== 1) throw refuse(`专用 Chrome 里填好的 ${NAMES[id]} 发帖页有 ${cands.length} 个，要恰好 1 个才提交`);
+  if (cands.length !== 1) throw refuse(`egolite 里填好的 ${NAMES[id]} 发帖页有 ${cands.length} 个，要恰好 1 个才提交`);
   log(ep.id, id, 'manual-submit', `tab ${cands[0]}`);
   await after(ep, pj, id, { state: 'filled', tabId: cands[0] });
   const now = getTask(ep.id, id);
@@ -131,7 +139,7 @@ async function run() {
   if (todo.includes('x') && pj.platforms.x.mode === 'article+quote') {
     if (!articleOn()) throw new Error('这期 X 是长文模式，只在作者自己的本地插件环境里可用；把 publish.json 里 X 的 mode 去掉，按普通视频帖发');
     todo = todo.filter(i => i !== 'x');
-    if (!LOCKED.includes((getTask(ep.id, 'x') || {}).state)) setTask(ep.id, 'x', 'scheduled', '长文模式：定时前 25 分钟由麦田启动长文脚本（长文 + 视频帖引用长文）');
+    if (!LOCKED.includes((getTask(ep.id, 'x') || {}).state)) setTask(ep.id, 'x', 'scheduled', '长文模式：定时前 25 分钟由 howieip-studio 启动长文脚本（长文 + 视频帖引用长文）');
   }
 
   // 防重 1：库里已经到位的不再跑
@@ -144,17 +152,21 @@ async function run() {
 
   // 防重 2：平台上已经有了的不再跑
   if (todo.includes('x')) { const e = await xExisting(pj.platforms.x.text).catch(() => null); if (e) { setTask(ep.id, 'x', e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'x'); console.log('X 上已经有这条，跳过'); } }
-  if (todo.includes('youtube')) { const rows = await ytRows(pj.platforms.youtube.title).catch(() => null); if (rows && rows.length) {
+  if (todo.includes('youtube') && pj.platforms.youtube.mode === 'article') {
+    const hit = await ytPostExisting(pj.platforms.youtube.title).catch(() => null);
+    if (hit) { setTask(ep.id, 'youtube', 'awaiting_user', hit.detail); todo = todo.filter(i => i !== 'youtube'); console.log('YouTube 帖子里已经有同标题，不再填写'); }
+  } else if (todo.includes('youtube')) { const rows = await ytRows(pj.platforms.youtube.title).catch(() => null); if (rows && rows.length) {
     todo = todo.filter(i => i !== 'youtube');
     const url = (rows[0].match(/https:\S+/) || [])[0];
     if (rows.length === 1 && /已安排|定时|首播|公开/.test(rows[0]) && !/草稿|待处理/.test(rows[0])) setTask(ep.id, 'youtube', /已安排|定时|首播/.test(rows[0]) ? 'scheduled' : 'published', rows[0].replace(/ https:\S+/, ''), { url });
     else { setTask(ep.id, 'youtube', 'awaiting_user', `Studio 里已有 ${rows.length} 条同标题视频：${rows.join('；')}`); await notify(`⚠️ ${ep.name}\nYouTube Studio 里已有同标题视频（${rows.join('；')}），没有再上传，请先处理`); }
   } }
-  if (todo.includes('instagram')) { const e = await igExisting(pj.platforms.instagram.caption, pj.schedule).catch(() => null); if (e) { setTask(ep.id, 'instagram', e.count > 1 ? 'awaiting_user' : e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'instagram'); console.log('Instagram 上已经有这一期，跳过'); if (e.count > 1) await notify(`⚠️ ${ep.name}\nInstagram ${e.detail}，请去定时内容里删掉多余的`); } }
-  if (todo.includes('zsz')) { const cs = await zszCourses(pj.platforms.zsz.title).catch(() => []); if (cs.length) { setTask(ep.id, 'zsz', cs[0].vis === 'published' ? 'published' : 'scheduled', '后台已有同名课程', { url: SITE.courseUrl(cs[0]) }); todo = todo.filter(i => i !== 'zsz'); } }
+  if (todo.includes('instagram')) { const ig = pj.platforms.instagram; const e = await igExisting(ig.caption, pj.schedule, ig.mode === 'images').catch(() => null); if (e) { setTask(ep.id, 'instagram', e.count > 1 ? 'awaiting_user' : e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'instagram'); console.log('Instagram 上已经有这一期，跳过'); if (e.count > 1) await notify(`⚠️ ${ep.name}\nInstagram ${e.detail}，请去定时内容里删掉多余的`); } }
+  if (todo.includes('mp')) { const e = await mpExisting(pj.platforms.mp.title).catch(() => null); if (e) { setTask(ep.id, 'mp', e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'mp'); console.log('服务号上已经有同标题，跳过'); } }
+  if (todo.includes('zsz')) { const cs = await zszCourses(pj.platforms.zsz.title).catch(() => []); if (cs.length) { setTask(ep.id, 'zsz', cs[0].vis === 'published' ? 'published' : 'scheduled', '后台已有同名课程', { url: getSite()?.courseUrl(cs[0]) || '' }); todo = todo.filter(i => i !== 'zsz'); } }
   // 知识站没有定时：建课转码完就直接上线、发 VIP 群通知。定时发布的期推迟到定时前 ZSZ_LEAD 分钟由守护进程建课
   //（2026-11-12 第 37 期提前将近一天上线）
-  if (todo.includes('zsz') && !args.includes('--now') && pj.schedule && Date.parse(pj.schedule) - Date.now() > (ZSZ_LEAD + 10) * 60000) {
+  if (todo.includes('zsz') && pj.platforms.zsz.mode !== 'article' && !args.includes('--now') && pj.schedule && Date.parse(pj.schedule) - Date.now() > (ZSZ_LEAD + 10) * 60000) {
     setTask(ep.id, 'zsz', 'pending', `定时前 ${ZSZ_LEAD} 分钟自动建课（知识站没有定时，转码完即上线）`);
     todo = todo.filter(i => i !== 'zsz');
     console.log(`知识站推迟到定时前 ${ZSZ_LEAD} 分钟由守护进程上传`);
@@ -168,7 +180,7 @@ async function run() {
     await drv.ensure();
     const lr = await drv.checkLogin(todo.filter(i => i !== 'zsz'));
     loggedOut = todo.filter(i => i !== 'zsz' && lr[i] && !lr[i].ok);
-    if (loggedOut.length) await notify(`🔑 ${ep.name}\n这些平台没登录：${loggedOut.map(i => NAMES[i]).join('、')}\n请现在在专用 Chrome 里扫码，其他平台先跑；扫完 20 分钟内会自动补跑\n${loggedOut.map(i => LOGIN_PAGES[i]).join('\n')}`);
+    if (loggedOut.length) await notify(`🔑 ${ep.name}\n这些平台没登录：${loggedOut.map(i => NAMES[i]).join('、')}\n请现在在egolite 里扫码，其他平台先跑；扫完 20 分钟内会自动补跑\n${loggedOut.map(i => loginPage(i)).join('\n')}`);
   } catch (e) { console.error('开跑前登录检查出错：' + e.message); }
   await notify(`🚀 开始发布：${ep.name}\n定时：${pj.schedule ? pj.schedule.replace('T', ' ').slice(0, 16) : '立即'}\n本轮：${todo.map(i => NAMES[i]).join('、')}\n顺序：${config.batches.map(b => b.filter(i => todo.includes(i)).map(i => NAMES[i]).join('+')).filter(Boolean).join(' → ')}`);
 
@@ -272,16 +284,33 @@ async function metricsReport(list) {
   else console.log('没有已发布的平台可采集');
 }
 
+// 记下登录结果。从已登录变成掉线才提醒；第一次就是未登录的只记 out，不发「登录过期」
+async function rememberLogin(id, ok) {
+  const was = getMeta(`login:${id}`) || '';
+  if (ok) {
+    if (was !== 'ok') { setMeta(`login:${id}`, 'ok'); setMeta(`loginSince:${id}`, Date.now()); }
+    return;
+  }
+  if (was === 'out') return;
+  setMeta(`login:${id}`, 'out');
+  if (was !== 'ok') return;
+  const since = +getMeta(`loginSince:${id}`) || 0;
+  log('', id, 'login-expired', since ? `保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时` : '');
+  await notify(`🔑 ${NAMES[id]}登录过期了${since ? `（这次保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时）` : ''}\n发布前请在egolite 里重新扫码：${loginPage(id)}`);
+}
+
 async function doctor() {
   const p = pluginInfo();
-  if (!p.dir) throw new Error(`还没装麦田发布助手：运行 node src/hub.mjs login，在专用 Chrome 里从应用商店添加（${STORE_URL}）`);
-  console.log(`麦田发布助手：${p.source === 'store' ? '商店版' : '本地'} ${p.version || ''}`);
+  if (!p.dir) throw new Error(`还没装 howieip-studio 发布助手：运行 node src/hub.mjs login，在egolite 里从应用商店添加（${STORE_URL}）`);
+  console.log(`howieip-studio 发布助手：${p.source === 'store' ? '商店版' : '本地'} ${p.version || ''}`);
   await drv.ensure();
-  const r = await drv.checkLogin(ALL);
-  const lines = ALL.map(id => `${NAMES[id]}：${r[id] && r[id].ok ? '✅ 已登录，上传页正常' : `❌ ${r[id] ? r[id].reason : '没有结果'}`}`);
-  const bad = ALL.filter(id => !(r[id] && r[id].ok));
+  const ids = allPlatforms();
+  const r = await drv.checkLogin(ids);
+  for (const id of ids) await rememberLogin(id, !!(r[id] && r[id].ok));
+  const lines = ids.map(id => `${NAMES[id]}：${r[id] && r[id].ok ? '✅ 已登录，上传页正常' : `❌ ${r[id] ? r[id].reason : '没有结果'}`}`);
+  const bad = ids.filter(id => !(r[id] && r[id].ok));
   console.log(lines.join('\n'));
-  if (args.includes('--notify') || bad.length) await notify(`🩺 发布中控体检（${drv.mode === 'plugin' ? '插件方式' : '专用 Chrome'}）\n${lines.join('\n')}${bad.length ? helpTip() : ''}`);
+  if (args.includes('--notify') || bad.length) await notify(`🩺 发布中控体检（${drv.mode === 'plugin' ? '插件方式' : 'egolite'}）\n${lines.join('\n')}${bad.length ? helpTip() : ''}`);
   return bad;
 }
 
@@ -344,11 +373,11 @@ async function daemon() {
   console.log(`发布中控守护进程启动（${drv.mode}）`);
   // 开机后 NAS 往往比守护进程晚挂上：等一等，自己挂一次（密码在钥匙串里），5 分钟还不行再报警
   { let ok = false; for (let i = 0; i < 10 && !(ok = await ensureNas()); i++) await drv.sleep(30000);
-    if (ok) console.log('NAS 可读'); else await notify('⚠️ 麦田守护进程启动 5 分钟后仍读不到 NAS（已尝试自动挂载），取链接和封面会失败，请检查 NAS 是否开机'); }
+    if (ok) console.log('NAS 可读'); else await notify('⚠️ howieip-studio 守护进程启动 5 分钟后仍读不到 NAS（已尝试自动挂载），取链接和封面会失败，请检查 NAS 是否开机'); }
   const MIN = 60000, every = (key, ms) => { const last = +getMeta(key) || 0; if (Date.now() - last < ms) return false; setMeta(key, Date.now()); return true; };
   for (;;) {
     try {
-      if (!(await ensureNas()) && every('nasAlert', 60 * MIN)) await notify('⚠️ 麦田读不到 NAS，已尝试自动挂载但没成功');
+      if (!(await ensureNas()) && every('nasAlert', 60 * MIN)) await notify('⚠️ howieip-studio 读不到 NAS，已尝试自动挂载但没成功');
       else if (every('scanPlans', 30 * MIN)) { const n = scanPlans(); if (n.length) await notify(`🗓 分发计划新增 ${n.length} 期\n${n.join('\n')}`); }
       for (const ep of episodes()) {
         if (Date.now() - Date.parse(ep.created_at) > 14 * 86400e3) continue;
@@ -362,7 +391,7 @@ async function daemon() {
         }
         if (zt && zt.state === 'scheduled' && every(`zszcheck:${ep.id}`, 10 * MIN)) {
           const pj0 = loadProject(ep.dir); const cs = await zszCourses(pj0.platforms.zsz.title).catch(() => []);
-          if (cs.length === 1 && cs[0].vis === 'published') { setTask(ep.id, 'zsz', 'published', '已上线', { url: SITE.courseUrl(cs[0]) }); await notify(`✅ ${ep.name}\n知识站：已上线`); }
+          if (cs.length === 1 && cs[0].vis === 'published') { setTask(ep.id, 'zsz', 'published', '已上线', { url: getSite()?.courseUrl(cs[0]) || '' }); await notify(`✅ ${ep.name}\n知识站：已上线`); }
         }
         const waiting = tasks.filter(t => t.state === 'awaiting_user');
         const unsettled = tasks.filter(t => t.state === 'scheduled' || (t.state === 'published' && !t.url && t.platform !== 'channels'));
@@ -386,15 +415,9 @@ async function daemon() {
       // 登录保活：定期打开一下后台首页（视频号的扫码登录过期快），掉线就提醒，并记下每次保持了多久
       for (const id of config.keepAlive || []) {
         if (!every(`keep:${id}`, (config.keepAliveMinutes || 60) * MIN)) continue;
-        const ok = await drv.withTab(LOGIN_PAGES[id], async (t) => !/login|passport|signin/i.test((await chrome.tabs.get(t)).url) && !(await drv.evaluate(t, `/扫码登录/.test(document.body.innerText) && /验证码登录|密码登录/.test(document.body.innerText)`).catch(() => false)), { wait: 12000 }).catch(() => null);
+        const ok = await drv.withTab(loginPage(id), async (t) => !/login|passport|signin/i.test((await chrome.tabs.get(t)).url) && !(await drv.evaluate(t, `/登录超时|请重新登录|微信扫一扫，选择公众平台账号登录/.test(document.body.innerText) || (/扫码登录/.test(document.body.innerText) && /验证码登录|密码登录/.test(document.body.innerText))`).catch(() => false)), { wait: 12000 }).catch(() => null);
         if (ok === null) continue;
-        const was = getMeta(`login:${id}`);
-        if (ok && was !== 'ok') { setMeta(`login:${id}`, 'ok'); setMeta(`loginSince:${id}`, Date.now()); }
-        if (!ok && was !== 'out') {
-          const since = +getMeta(`loginSince:${id}`) || 0; setMeta(`login:${id}`, 'out');
-          log('', id, 'login-expired', since ? `保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时` : '');
-          await notify(`🔑 ${NAMES[id]}登录过期了${since ? `（这次保持了 ${((Date.now() - since) / 3600e3).toFixed(1)} 小时）` : ''}\n发布前请在专用 Chrome 里重新扫码：${LOGIN_PAGES[id]}`);
-        }
+        await rememberLogin(id, !!ok);
       }
       // X 长文模式：定时前 25 分钟启动长文脚本（每期只启动一次）
       for (const ep of episodes()) {
@@ -418,7 +441,7 @@ async function daemon() {
         if (!getTasks(ep.id).some(t => t.state === 'planned') || getMeta(`eve:${ep.id}`)) continue;
         setMeta(`eve:${ep.id}`, Date.now());
         const bad = await doctor().catch(() => null);
-        if (bad && !bad.length) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，${ALL.length} 个平台登录都正常`);
+        if (bad && !bad.length) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，${allPlatforms().length} 个平台登录都正常`);
         else if (bad) await notify(`🌙 ${ep.name}\n明天 ${ep.schedule.slice(11, 16)} 发布，今晚先把这些平台登录好：${bad.map(i => NAMES[i]).join('、')}`);
       }
       // 每天上午体检一次，有平台掉线才通知
@@ -453,9 +476,10 @@ try {
   }
   else if (cmd === 'login') {
     const p = pluginInfo(), needStore = p.source !== 'local' && !p.dir;
-    await drv.openForLogin([...(needStore ? [STORE_URL] : []), ...ALL.map(i => LOGIN_PAGES[i])]);
-    if (needStore) console.log(`第一步：在专用 Chrome 里的应用商店页面点「添加至 Chrome」，装上麦田发布助手（之后 Chrome 会自动更新它）`);
-    console.log(`专用 Chrome 已打开 ${ALL.length} 个平台页面，登录完运行 hub doctor 检查`);
+    const ids = allPlatforms();
+    await drv.openForLogin([...(needStore ? [STORE_URL] : []), ...ids.map(i => loginPage(i))]);
+    if (needStore) console.log(`第一步：在egolite 里的应用商店页面点「添加至 Chrome」，装上 howieip-studio 发布助手（之后 Chrome 会自动更新它）`);
+    console.log(`egolite 已打开 ${ids.length} 个平台页面，登录完运行 hub doctor 检查`);
   }
   else if (cmd === 'followers') { await drv.ensure(); console.log(JSON.stringify(await collectFollowers(opt('--only') ? opt('--only').split(',') : null, opt('--skip') ? opt('--skip').split(',') : []), null, 1)); }
   else if (cmd === 'daemon') await daemon();

@@ -1,10 +1,10 @@
-﻿# 麦田 · Windows 一键安装
+﻿# howieip-studio · Windows 一键安装
 #   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install-windows.ps1 | iex"
 # 做的事（与 scripts/install.sh 逐步对应）：检查 git 和 Node（≥22.5，缺了用 winget 装）→
-#   把麦田和麦田发布助手克隆到 %USERPROFILE%\maitian\ → 拷双击启动器 → 接上发布 skill → 运行安装向导
-# 换目录：先设环境变量 MAITIAN_HOME，如 $env:MAITIAN_HOME = 'D:\maitian' 再运行
+#   把上游仓库 mdldm-maitian 克隆到 %USERPROFILE%\howieip-studio\ → 拷双击启动器 → 接上发布 skill → 运行安装向导
+# 换目录：先设环境变量 HOWIEIP_STUDIO_HOME，如 $env:HOWIEIP_STUDIO_HOME = 'D:\howieip-studio' 再运行
 $ErrorActionPreference = 'Stop'
-$Base = if ($env:MAITIAN_HOME) { $env:MAITIAN_HOME } else { Join-Path $HOME 'maitian' }
+$Base = if ($env:HOWIEIP_STUDIO_HOME) { $env:HOWIEIP_STUDIO_HOME } else { Join-Path $HOME 'howieip-studio' }
 $Hub  = Join-Path $Base 'mdldm-maitian'
 
 function Say($t) { Write-Host "`n== $t" -ForegroundColor Green }
@@ -12,7 +12,7 @@ function Ok($t)  { Write-Host "  OK $t" }
 function Tip($t) { Write-Host "  · $t" -ForegroundColor Yellow }
 function Refresh-Path { $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User') }
 
-Say "麦田 · Windows 一键安装（装到 $Base）"
+Say "howieip-studio · Windows 一键安装（装到 $Base）"
 New-Item -ItemType Directory -Force -Path $Base | Out-Null
 
 # ---------- 1. Git ----------
@@ -45,7 +45,7 @@ if (-not $nodeOk) {
 }
 
 # ---------- 3. 克隆/更新两个仓库 ----------
-Say '下载麦田本体与发布助手'
+Say '下载 howieip-studio 本体与发布助手'
 foreach ($r in @('mdldm-maitian')) {
   $dest = Join-Path $Base $r
   if (Test-Path (Join-Path $dest '.git')) { Tip "更新 $r"; git -C $dest pull --ff-only -q }
@@ -68,9 +68,9 @@ foreach ($b in @('1-demo.bat','2-login.bat','3-doctor.bat','4-start.bat')) {
   if (Test-Path $src) { Copy-Item $src (Join-Path $Base $b) -Force; Ok $b }
 }
 
-# ---------- 5. 麦田发布助手（Chrome 插件） ----------
-Say '麦田发布助手（Chrome 插件）'
-Write-Host '  从 Chrome 应用商店装：安装向导最后会在麦田的专用 Chrome 里打开商店页，点「添加至 Chrome」即可，之后自动更新'
+# ---------- 5. howieip-studio 发布助手（Chrome 插件） ----------
+Say 'howieip-studio 发布助手（Chrome 插件）'
+Write-Host '  从 Chrome 应用商店装：安装向导最后会在 howieip-studio 的专用 Chrome 里打开商店页，点「添加至 Chrome」即可，之后自动更新'
 
 # ---------- 6. 发布 skill ----------
 Say '发布 skill'

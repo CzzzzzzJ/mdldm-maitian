@@ -4,11 +4,42 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#f5f5f7">
-<title>麦田</title>
-<meta name="apple-mobile-web-app-title" content="麦田">
-<link rel="apple-touch-icon" href="/static/icon-180.png">
-<link rel="icon" href="/static/icon-180.png">
+<meta name="theme-color" content="#07080d">
+<script>
+(function () {
+  var t = localStorage.getItem('howieip-theme');
+  if (t !== 'light' && t !== 'dark') t = 'dark';
+  document.documentElement.dataset.theme = t;
+  var m = document.querySelector('meta[name=theme-color]');
+  if (m) m.content = t === 'light' ? '#f4f4f6' : '#07080d';
+})();
+function applyAppIcon(href, quiet) {
+  if (!href) return;
+  const paint = (src) => {
+    for (const rel of ['icon', 'apple-touch-icon']) {
+      document.querySelectorAll('link[rel="' + rel + '"]').forEach((n, i) => { if (i) n.remove(); });
+      let link = document.querySelector('link[rel="' + rel + '"]');
+      if (!link) { link = document.createElement('link'); link.rel = rel; document.head.append(link); }
+      const next = document.createElement('link'); next.rel = rel; next.href = src; link.replaceWith(next);
+    }
+    if (!quiet) { try { applyAppIcon.ch.postMessage(src); } catch (e) {} }
+  };
+  if (href.slice(0, 5) === 'data:') { paint(href); return; }
+  const img = new Image();
+  img.onload = () => {
+    const s = 64, c = document.createElement('canvas'); c.width = s; c.height = s;
+    const k = Math.min(img.width, img.height);
+    c.getContext('2d').drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, s, s);
+    paint(c.toDataURL('image/png'));
+  };
+  img.src = href;
+}
+try { applyAppIcon.ch = new BroadcastChannel('howieip-icon'); applyAppIcon.ch.onmessage = (e) => applyAppIcon(e.data, true); } catch (e) {}
+</script>
+<title>howieip-studio</title>
+<meta name="apple-mobile-web-app-title" content="howieip-studio">
+<link rel="apple-touch-icon" href="/icon">
+<link rel="icon" href="/icon">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/static/mt.css">
 
@@ -17,6 +48,7 @@
 <div class="bgfx"><i></i><i></i><i></i></div>
 <div class="page" id="app"><div class="empty" style="height:60vh">加载中…</div></div>
 <script src="/static/mt.js"></script>
+<script src="/static/prefs.js"></script>
 <script>
 let O = null, F = {}, timer = null, pick = null;
 const dayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -34,10 +66,11 @@ let after = () => {};
 function vTraffic() {
   const eps = O.episodes.filter(e => e.views > 1); if (!eps.length) return `<div class="h1">流量</div><p class="lead">还没采到流量。</p>${abtn({ type: 'metrics' }, '现在采一次', 'pri')}`;
   const all = sum(eps, 'views'), it = sum(eps, 'inter'), byP = PL.map(p => ({ p, v: eps.reduce((s, e) => s + ((M(e, p) || {}).views || 0), 0) })).sort((a, b) => b.v - a.v);
+  const topP = byP[0];
   const e = eps.find(x => x.id === pick) || eps[0], rows = PL.map(p => ({ p, m: M(e, p), t: e.tasks.find(t => t.platform === p) })).filter(r => r.m), mx = Math.max(...rows.map(r => r.m.views || 0), 1);
   after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
   return `<div class="h1">流量</div><p class="lead">每一期在每个平台的播放和互动。每天上午采一次；新发的一期头三天每 6 小时采一次。</p>
-  <div class="grid g4">${tile('累计播放', fmt(all), `${eps.length} 期合计`)}${tile('累计互动', fmt(it), `互动率 ${pct(it, all, 1)}`)}${tile('平均每期播放', fmt(all / eps.length))}${tile('播放最多的平台', PN[byP[0].p], `${fmt(byP[0].v)}，占 ${pct(byP[0].v, all)}`)}</div>
+  <div class="grid g4">${tile('累计播放', fmt(all), `${eps.length} 期合计`)}${tile('累计互动', fmt(it), `互动率 ${pct(it, all, 1)}`)}${tile('平均每期播放', fmt(all / eps.length))}${tile('播放最多的平台', topP ? PN[topP.p] : '–', topP ? `${fmt(topP.v)}，占 ${pct(topP.v, all)}` : '登录平台后才会出现')}</div>
   ${sec('每期 × 平台', '格子里是播放数，细条是这一期里的占比')}
   <div class="panel"><div class="tw"><table><thead><tr><th>期</th>${PL.map(p => `<th class="n">${logo(p)}${PN[p]}</th>`).join('')}<th class="n">合计</th><th class="n">互动率</th></tr></thead><tbody>
     ${eps.map(x => { const m2 = Math.max(...PL.map(p => (M(x, p) || {}).views || 0), 1); return `<tr><td><a href="#/ep/${encodeURIComponent(x.id)}" title="${esc(x.name)}">${epc(x)}</a></td>${PL.map(p => { const m = M(x, p); return `<td class="n">${m ? fmt(m.views) : '–'}<span class="cellbar"><i style="width:${m ? (m.views / m2 * 100).toFixed(0) : 0}%"></i></span></td>`; }).join('')}<td class="n"><b>${fmt(x.views)}</b></td><td class="n">${pct(x.inter, x.views, 1)}</td></tr>`; }).join('')}</tbody></table></div></div>
@@ -52,6 +85,7 @@ function vTraffic() {
 }
 
 function vConvert() {
+  if (O.siteOn && (O.health.login || {}).zsz !== 'ok') return `<div class="h1">转化</div><p class="lead">登录知识站后才会出现。</p>`;
   if (!O.siteOn) return `<div class="h1">转化</div><p class="lead">还没接你自己的站点。</p>
   <div class="panel" style="padding:18px 20px;line-height:1.8;font-size:14px;color:var(--t2)">
     <p style="margin:0 0 10px">有课程站、会员站或者自己的产品，就能在这里看到：哪一期、哪个平台带来了注册和付费，每期一条「播放 → 注册 → 会员 → 收入」的漏斗。</p>
@@ -82,7 +116,7 @@ function vCalendar() {
   // 日历：上周、这周、下两周，每天列出这天发的期（已发布 / 已定时 / 等你点 / 计划中）
   const DAY = 864e5, now = new Date(), dow = (now.getDay() + 6) % 7, mon0 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow - 7);
   const days = Array.from({ length: 28 }, (_, i) => new Date(mon0.getTime() + i * DAY)), key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const st = (e) => { const s = e.tasks.map(t => t.state); return s.some(x => ['failed', 'not_logged_in'].includes(x)) ? ['bad', '异常'] : s.some(x => ['awaiting_user', 'filled'].includes(x)) ? ['todo', '等你点发布'] : s.every(x => x === 'published' || x === 'skipped') ? ['ok', '已发布'] : s.some(x => x === 'planned') ? ['plan', '计划中'] : ['sch', '已定时']; };
+  const st = (e) => { const s = e.tasks.filter(t => PL.includes(t.platform)).map(t => t.state); if (!s.length) return ['plan', '未登录']; return s.some(x => ['failed', 'not_logged_in'].includes(x)) ? ['bad', '异常'] : s.some(x => ['awaiting_user', 'filled'].includes(x)) ? ['todo', '等你点发布'] : s.every(x => x === 'published' || x === 'skipped') ? ['ok', '已发布'] : s.some(x => x === 'planned') ? ['plan', '计划中'] : ['sch', '已定时']; };
   const by = {}; for (const e of O.episodes) { const d = new Date(e.schedule || e.createdAt); (by[key(d)] ||= []).push(e); }
   const today = key(now), upcoming = O.episodes.filter(e => e.schedule && Date.parse(e.schedule) > Date.now()).length;
   return `<div class="h1">日历</div><p class="lead">上周到未来两周的分发安排。${upcoming ? `接下来还有 <b>${upcoming}</b> 期要发。` : '接下来没有排期，可以用 <code>hub plan</code> 把下一期放进来。'}</p>
@@ -95,25 +129,26 @@ function vArchive() {
   if (!O.episodes.length) return `<div class="h1">档案</div><p class="lead">还没有登记的期数。</p>`;
   return `<div class="h1">档案</div><p class="lead">每一期发了什么、发到哪、数据怎么样。</p>
   <div class="wall">${O.episodes.map(e => `<a class="panel poster" href="#/ep/${encodeURIComponent(e.id)}"><div class="im" style="${e.covers.length ? `background-image:url('/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}')` : ''}"></div>
-    <div class="tx"><div class="ep">第 ${esc(e.episode)} 期 · ${when(e.schedule || e.createdAt)}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length} 已发布</span></div></div></a>`).join('')}</div>`;
+    <div class="tx"><div class="ep">第 ${esc(e.episode)} 期 · ${when(e.schedule || e.createdAt)}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => PL.includes(t.platform) && t.state === 'published').length}/${e.tasks.filter(t => PL.includes(t.platform)).length} 已发布</span></div></div></a>`).join('')}</div>`;
 }
 
 async function vEpisode(id) {
   const e = await api('/api/episode?id=' + encodeURIComponent(id)), [t1, t2] = e.name.split(/[｜|]/).map(x => x.trim());
-  const todo = e.tasks.filter(t => ['awaiting_user', 'filled'].includes(t.state));
+  const shown = e.tasks.filter(t => PL.includes(t.platform));
+  const todo = shown.filter(t => ['awaiting_user', 'filled'].includes(t.state));
   after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
   return `<a class="back" href="#/archive">‹ 档案</a>
   <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}" alt="">` : '<div></div>'}
     <div><div class="eyebrow">第 ${esc(e.episode)} 期</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
-      <div style="display:flex;gap:34px;flex-wrap:wrap;margin:6px 0 16px"><div><div class="lab" style="font-size:12px;color:var(--t3)">全平台播放</div><div class="val">${e.views > 1 ? fmt(e.views) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动</div><div class="val">${e.views > 1 ? fmt(e.inter) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动率</div><div class="val">${e.views > 1 ? pct(e.inter, e.views, 1) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">已发布</div><div class="val">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length}</div></div></div>
+      <div style="display:flex;gap:34px;flex-wrap:wrap;margin:6px 0 16px"><div><div class="lab" style="font-size:12px;color:var(--t3)">全平台播放</div><div class="val">${e.views > 1 ? fmt(e.views) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动</div><div class="val">${e.views > 1 ? fmt(e.inter) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动率</div><div class="val">${e.views > 1 ? pct(e.inter, e.views, 1) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">已发布</div><div class="val">${shown.filter(t => t.state === 'published').length}/${shown.length}</div></div></div>
       <dl class="kv"><dt>发布时间</dt><dd>${e.schedule ? when(e.schedule) : '立即发布'}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
       <div class="btns" style="margin-top:16px">${abtn({ type: 'sync', id: e.id }, '取链接、对状态', 'pri')}${abtn({ type: 'metrics', id: e.id }, '采这一期的流量')}</div></div></div>
   ${todo.length ? `${sec('等你点发布')}<div class="panel">${todo.map(t => `<div class="prow">${logo(t.platform)}<span class="n" style="width:auto;margin-right:auto">${esc(PN[t.platform] || t.name)}<span style="color:var(--t3);margin-left:10px;font-size:12px">${esc(t.detail)}</span></span>${abtn({ type: 'mark', id: e.id, platform: t.platform, state: 'published' }, '我已发布', '', `确认「${t.name}」已经发出去了？`)}</div>`).join('')}</div>` : ''}
   ${sec('各平台')}
   <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th>状态</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th></th></tr></thead><tbody>
     ${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => { const m = t.m || {}, u = safeUrl(t.url); return `<tr><td>${logo(t.platform)}${esc(PN[t.platform] || t.name)}</td><td>${chip(t)}</td><td class="n"><b>${fmt(m.views)}</b></td><td class="n">${fmt(m.likes)}</td><td class="n">${fmt(m.comments)}</td><td class="n">${fmt(m.favorites)}</td><td class="n">${fmt(m.shares)}</td><td class="n">${m.views ? pct(inter(m), m.views, 1) : '–'}</td><td class="n">${u ? `<a href="${u}" target="_blank" rel="noopener">打开 ↗</a>` : `<span style="color:var(--t3)">${esc(t.detail).slice(0, 18)}</span>`}</td></tr>`; }).join('')}</tbody></table></div></div>
-  ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
-    ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
+  ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${PL.includes('zsz') ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
+    ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${PL.includes('zsz') ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
   ${sec('播放走势', '每次采样一个点')}<div class="panel"><div class="chartbox" id="c-line"></div></div>
   ${sec('当时发的文案', e.snapshotAt ? `存档于 ${when(e.snapshotAt)}` : '没有存档，显示的是工程目录里现在的内容')}
   <div class="panel">${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => `<details><summary>${logo(t.platform)}<b>${esc(PN[t.platform] || t.name)}</b><span>${esc(t.copy.title || t.copy.body.slice(0, 50))}</span></summary>${t.copy.title ? `<div class="copy"><b>${esc(t.copy.title)}</b></div>` : ''}${t.copy.body ? `<div class="copy">${esc(t.copy.body)}</div>` : ''}${t.copy.tags.length ? `<div style="margin-top:8px;font-size:12.5px;color:var(--t3)">${t.copy.tags.map(x => '#' + esc(x)).join('  ')}</div>` : ''}${t.shot ? `<img class="shot" loading="lazy" src="/shot?id=${encodeURIComponent(e.id)}&p=${t.platform}" alt="提交前的页面截图">` : ''}</details>`).join('')}</div>
@@ -121,25 +156,44 @@ async function vEpisode(id) {
 }
 
 function vSystem() {
-  const h = O.health, today = new Date().toLocaleDateString('zh-CN'), cur = O.episodes[0];
-  return `<div class="h1">系统</div><p class="lead">麦田自己的运行情况，和需要手动触发的操作。发布只能从命令行发起，这里没有上传入口。</p>
-  <div class="grid g4">${tile('守护进程', '运行中', '开机自启，崩溃自动拉起')}${tile('NAS', h.nas ? '已挂载' : '读不到', h.nas ? '工程目录可读' : '取链接和封面会失败')}${tile('专用浏览器', h.chrome ? '在线' : '没开', '七个平台的登录都在这里')}${tile('平台登录', Object.values(h.login).every(v => v === 'ok') ? '正常' : '有掉线', `上次体检 ${esc(h.doctorDay || '还没做')}${h.doctorDay === today ? '（今天）' : ''}`)}</div>
+  const h = O.health, today = new Date().toLocaleDateString('zh-CN'), cur = O.episodes[0], lamp = loginLamp(h);
+  const ever = h.loginEver || {}, nameOf = (id) => PN[id] || id;
+  const onIds = Object.keys(h.login || {}).filter(id => h.login[id] === 'ok').map(nameOf);
+  const outIds = Object.keys(h.login || {}).filter(id => h.login[id] === 'out' && ever[id]).map(nameOf);
+  return `<div class="h1">系统</div><p class="lead">howieip-studio 自己的运行情况，和需要手动触发的操作。发布只能从命令行发起，这里没有上传入口。</p>
+  <div class="grid g4">${tile('守护进程', '运行中', '开机自启，崩溃自动拉起')}${tile('NAS', h.nas ? '已挂载' : '读不到', h.nas ? '工程目录可读' : '取链接和封面会失败')}${tile('egolite', h.chrome ? '在线' : '没开', '各平台的登录都在这里')}${tile('平台登录', lamp.text === '有掉线' ? '有掉线' : (onIds.length ? '正常' : '还没有'), `已登录：${esc(onIds.join('、') || '无')}${outIds.length ? `。已掉线：${esc(outIds.join('、'))}` : ''}。上次体检 ${esc(h.doctorDay || '还没做')}${h.doctorDay === today ? '（今天）' : ''}`)}</div>
   ${sec('手动操作', '同一时间只跑一个')}
-  <div class="panel"><div class="btns">${abtn({ type: 'doctor' }, '体检：检查七个平台登录', 'pri')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}${abtn({ type: 'board' }, '同步知识站数据')}</div>
+  <div class="panel"><div class="btns">${abtn({ type: 'doctor' }, '体检：检查各平台登录', 'pri')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}${abtn({ type: 'board' }, '同步知识站数据')}</div>
     ${O.actions.length ? `<div style="margin-top:14px">${O.actions.map(a => `<div class="prow"><span class="st-chip ${a.done ? (a.ok ? 'published' : 'failed') : 'scheduled'}"><i>${a.done ? (a.ok ? '✓' : '✕') : '…'}</i>${a.done ? (a.ok ? '完成' : '出错') : '进行中'}</span><span>${esc(a.label)}</span><span class="d">${ago(a.startedAt)}</span></div>${a.done && !a.ok ? `<div class="copy">${esc(a.tail)}</div>` : ''}`).join('')}</div>` : ''}</div>
   ${sec('自动任务')}
-  <div class="panel"><dl class="kv"><dt>每 5 分钟</dt><dd>检查有没有到点要取链接的期数，提醒还没点发布的平台</dd><dt>每小时</dt><dd>视频号登录保活，掉线发飞书提醒</dd><dt>每天 9 点后</dt><dd>体检一次，有平台掉线才通知（上次：${esc(h.doctorDay || '还没做')}）</dd><dt>每天 10 点后</dt><dd>采流量和粉丝，发飞书日报（上次：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时每 6 小时采一次流量</dd></dl></div>
+  <div class="panel"><dl class="kv"><dt>每 5 分钟</dt><dd>检查有没有到点要取链接的期数，提醒还没点发布的平台</dd><dt>每小时</dt><dd>视频号和服务号登录保活，从已登录变成掉线才发飞书提醒</dd><dt>每天 9 点后</dt><dd>体检一次，并记下各平台登录结果（上次：${esc(h.doctorDay || '还没做')}）</dd><dt>每天 10 点后</dt><dd>采流量和粉丝，发飞书日报（上次：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时每 6 小时采一次流量</dd></dl></div>
   ${sec('最近动态')}<div class="panel">${O.feed.map(f => `<div class="fd"><span class="tm">${when(f.ts).split(' ')[1]}</span><span class="ep">${f.nick ? esc(f.nick) : ''}</span><span>${esc(f.platform)}</span><span class="rs">${esc(f.action)}${f.result ? ' · ' + esc(f.result) : ''}</span></div>`).join('') || '<div class="empty" style="height:60px">还没有动态</div>'}</div>`;
+}
+
+function vFormats() {
+  const all = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'zsz', 'mp', 'discord'];
+  const ofKind = (key) => (O.kinds && O.kinds[key] && O.kinds[key].platforms) || null;
+  const mark = (ids) => ids.map(p => `<span style="display:inline-flex;align-items:center;gap:6px;margin:0 12px 8px 0">${logo(p)}${PN[p] || p}</span>`).join('');
+  const missing = '<span style="color:var(--t3)">发布助手没装，读不到渠道名单</span>';
+  const card = (name, src, xhs, go) => `<div class="panel" style="padding:18px 18px 8px"><div class="eyebrow">${name}</div><p class="lead" style="margin:8px 0 14px">${src}</p><div style="font-size:12px;color:var(--t3);margin-bottom:6px">小红书</div><div style="font-size:14.5px;line-height:1.6;margin-bottom:14px">${xhs}</div><div style="font-size:12px;color:var(--t3);margin-bottom:6px">会发</div><div>${go ? mark(go.filter(p => all.includes(p))) : missing}</div><div style="font-size:12px;color:var(--t3);margin:8px 0 6px">不发</div><div style="margin-bottom:10px">${go ? (mark(all.filter(p => !go.includes(p))) || '<span style="color:var(--t3)">没有</span>') : missing}</div></div>`;
+  const carousel = ofKind('carousel'), article = ofKind('article');
+  return `<div class="h1">发布格式</div><p class="lead">一份类型，再分给支持这种内容的渠道。不支持的渠道跳过，不会改发成视频。</p>
+    <div class="grid g3">
+      ${card('视频', '不写类型就是视频。要有成片，各渠道仍用自己的标题和正文。', '视频笔记。传完后补 3:4 封面，人点发布。', ofKind('video') || all.filter(id => id !== 'discord'))}
+      ${card('轮播', '头部写「类型：轮播」和「图片：」。每行一张，顺序就是轮播顺序，1–18 张。各渠道用自己的标题和正文。', '图文笔记。第一张做封面，不裁 3:4，人点发布。', carousel)}
+      ${card('长文', '头部写「类型：长文」。各渠道用自己的标题和正文。', '发布页点「写长文」，填完排到「下一步」就停，不点发布。', article)}
+    </div>
+    <p class="lead">创作者后台还没登录。小红书图文和长文，以及抖音、视频号、服务号、X、Instagram 的图文选择器，抖音文章、B站专栏、YouTube 帖子、X 长文和知识站图文课的选择器，都还没在登录后的页面上核对过。</p>`;
 }
 
 async function render() {
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
-  let body; try { body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)(); } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
+  let body; try { body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : await ({ formats: vFormats, traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem, prefs: vPrefs }[key] || vTraffic)(); } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
   app.innerHTML = topbar(O, key) + body; after();
 }
 async function load() {
-  try { O = await api('/api/overview'); if (!O.siteOn) PL = PL.filter(p => p !== 'zsz'); else { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; await render(); }
-  catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
+  try { O = await api('/api/overview'); applyPlatforms(O); F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; applyAppIcon('/icon?t=' + Date.now(), true); await render(); }
+  catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上 howieip-studio 服务（${esc(e.message)}）</div>`; }
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
 document.addEventListener('click', async (e) => {
@@ -151,7 +205,7 @@ document.addEventListener('click', async (e) => {
 });
 addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
 addEventListener('resize', () => after());
-load(); setInterval(() => { if (!timer && !document.hidden && !document.querySelector('details[open]')) load(); }, 60000);
+load(); setInterval(() => { if (!timer && !document.hidden && !document.querySelector('details[open]') && !(location.hash === '#/prefs' && prefsDirty)) load(); }, 60000);
 </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-// 飞书验证码登录：打开麦田 → 点「发送验证码」→ 6 位码推到飞书群 → 输入后这台设备记住 30 天。
+// 飞书验证码登录：打开 howieip-studio → 点「发送验证码」→ 6 位码推到飞书群 → 输入后这台设备记住 30 天。
 // 开启：config.web.login = "feishu"（需要已配 feishuWebhook）。口令 ?key= 仍然可用，作备用。
 // 安全：验证码 5 分钟有效、只能用一次、输错 5 次作废；60 秒内只能发一次、每小时最多 10 次；
 // 会话 token 随机 32 字节，库里只存哈希（data/sessions.json，不进 git）。
@@ -35,7 +35,7 @@ export async function handleLogin(req, res, u, send) {
     const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
     pending = { hash: sha(code), at: now, tries: 0 }; sends.push(now);
     const who = ip(req), ua = String(req.headers['user-agent'] || '').match(/iPhone|iPad|Android|Macintosh|Windows/)?.[0] || '未知设备';
-    await notify(`🔐 麦田登录验证码\n验证码：${code}\n5 分钟内有效 · ${ua} · ${who}\n不是你本人在登录就忽略，别把验证码告诉别人`, { quiet: true });
+    await notify(`🔐 howieip-studio 登录验证码\n验证码：${code}\n5 分钟内有效 · ${ua} · ${who}\n不是你本人在登录就忽略，别把验证码告诉别人`, { quiet: true });
     send(res, 200, { ok: true }); return true;
   }
   if (u.pathname === '/login/verify' && req.method === 'POST') {
@@ -52,30 +52,38 @@ export async function handleLogin(req, res, u, send) {
   return false;
 }
 
-const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录麦田</title>
+const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 howieip-studio</title><link rel="icon" href="/icon"><link rel="apple-touch-icon" href="/icon">
+<script>(function(){var t=localStorage.getItem('howieip-theme');if(t!=='light'&&t!=='dark')t='dark';document.documentElement.dataset.theme=t;})();</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,'PingFang SC',sans-serif;color:#1c1a16;padding:20px;
-background:radial-gradient(700px 420px at 20% 15%,#f7f0e1,transparent 62%),radial-gradient(800px 520px at 90% 90%,#dfe8d6,transparent 60%),linear-gradient(135deg,#efe7d8,#e4e7dc 52%,#d9e3e8)}
-.c{width:100%;max-width:380px;background:rgba(255,255,255,.9);border-radius:22px;padding:34px 28px;box-shadow:0 24px 60px -30px rgba(30,30,20,.5);text-align:center}
+:root,html[data-theme="dark"]{color-scheme:dark;--bg:#07080d;--card:#121722;--ink:#f5f5f7;--muted:#aeaeb2;--line:rgba(255,255,255,.12);--field:#0c1018;--btn:#0a84ff}
+html[data-theme="light"]{color-scheme:light;--bg:#f4f4f6;--card:#fff;--ink:#1d1d1f;--muted:#6e6e73;--line:rgba(0,0,0,.1);--field:#fff;--btn:#0071e3}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,'PingFang SC',sans-serif;color:var(--ink);padding:20px;
+background:radial-gradient(80% 48% at 12% -8%,rgba(10,132,255,.22),transparent 58%),radial-gradient(48% 36% at 96% 0%,rgba(191,90,242,.16),transparent 54%),var(--bg)}
+html[data-theme="light"] body{background:radial-gradient(70% 50% at 12% -8%,rgba(0,113,227,.1),transparent 68%),radial-gradient(55% 40% at 96% 0%,rgba(191,90,242,.08),transparent 64%),var(--bg)}
+.c{width:100%;max-width:380px;background:linear-gradient(180deg,rgba(10,132,255,.18),transparent 42%),var(--card);border-radius:26px;padding:34px 28px;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 0 0 1px rgba(255,255,255,.06),0 24px 60px -30px rgba(0,0,0,.7);text-align:center}
 .mm{margin:0 auto 10px;display:block}
 h1{font-size:30px;font-weight:900}
-p{color:#6b6250;font-size:15px;margin:8px 0 22px;line-height:22px}
-button{width:100%;height:48px;border:0;border-radius:14px;font-size:17px;font-weight:800;cursor:pointer;background:#1c1a16;color:#fff}
+p{color:var(--muted);font-size:15px;margin:8px 0 22px;line-height:22px}
+button{width:100%;height:48px;border:0;border-radius:14px;font-size:17px;font-weight:800;cursor:pointer;background:var(--btn);color:#fff}
 button:disabled{opacity:.45}
-input{width:100%;height:56px;border:2px solid #e3dccd;border-radius:14px;font:800 28px 'SF Mono',Menlo,monospace;letter-spacing:12px;text-align:center;margin:14px 0 12px;outline:none}
-input:focus{border-color:#F2B21B}
-.msg{min-height:22px;font-size:14px;margin-top:12px;color:#8a5a00}
-.ok{color:#2e7d32}
-</style></head><body><div class="c">
+input{width:100%;height:56px;border:1px solid var(--line);border-radius:14px;font:800 28px 'SF Mono',Menlo,monospace;letter-spacing:12px;text-align:center;margin:14px 0 12px;outline:none;background:var(--field);color:var(--ink)}
+input:focus{border-color:#0a84ff}
+.msg{min-height:22px;font-size:14px;margin-top:12px;color:#ffd60a}
+.ok{color:#30d158}
+.theme{position:fixed;top:16px;right:16px;width:auto;height:32px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:600;background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+html[data-theme="light"] .theme::after{content:"深色"}
+html[data-theme="dark"] .theme::after{content:"浅色"}
+</style></head><body><button class="theme" id="theme" type="button" title="切换明暗"></button><div class="c">
 <svg class="mm" viewBox="0 0 12 13" width="72" height="78" shape-rendering="crispEdges">${mascot()}</svg>
-<h1>麦田</h1><p>验证码会发到你的飞书群</p>
+<h1>howieip-studio</h1><p>验证码会发到你的飞书群</p>
 <button id="send">发送验证码</button>
 <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="······">
-<button id="go" disabled>进入麦田</button>
+<button id="go" disabled>进入 howieip-studio</button>
 <div class="msg" id="msg"></div>
 </div><script>
 const $=id=>document.getElementById(id), msg=(t,ok)=>{$('msg').textContent=t;$('msg').className='msg'+(ok?' ok':'')};
+$('theme').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;localStorage.setItem('howieip-theme',next);};
 let wait=0;
 $('send').onclick=async()=>{ $('send').disabled=true;
   const r=await fetch('/login/send',{method:'POST'}).then(r=>r.json()).catch(()=>({error:'网络不通'}));

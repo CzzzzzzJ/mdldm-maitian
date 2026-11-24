@@ -3,7 +3,7 @@ import fs from 'node:fs'; import path from 'node:path'; import { execFile } from
 import { db, NAMES, STATE_CN, episodes, getTasks, setMeta } from './db.mjs';
 import { config } from './feishu.mjs';
 import { evaluate, withTab } from './driver.mjs';
-import { SITE } from './site.mjs';
+import { getSite } from './site.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const B = config.board;
@@ -46,6 +46,7 @@ const campaign = (dir) => { try { const pj = JSON.parse(fs.readFileSync(path.joi
 
 // 知识站后台的汇总数据（只读）：每日注册/会员/订单/收入，按渠道的注册和转化
 export async function fetchSite() {
+  const SITE = getSite();
   if (!SITE) throw new Error('没配置自有站点（config.site）');
   const d = await withTab(SITE.admin, (t) => evaluate(t, `fetch(${JSON.stringify(SITE.dashboardApi)},{credentials:'include'}).then(r=>r.ok?r.json():null).then(x=>x&&({reg:x.registrationTrend,rev:x.revenueTrend,ch:x.channelStats,camp:x.campaignStats||null}))`), { wait: 8000 });
   if (!d) throw new Error('知识站后台数据没读到（管理员登录过期？）');

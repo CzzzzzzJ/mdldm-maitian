@@ -3,7 +3,7 @@ import { evaluate, withTab, sleep } from './driver.mjs';
 import { num } from './metrics.mjs';
 import { db } from './db.mjs';
 import { config } from './feishu.mjs';
-import { SITE } from './site.mjs';
+import { getSite } from './site.mjs';
 
 db.exec(`CREATE TABLE IF NOT EXISTS followers (day TEXT, platform TEXT, total INTEGER, gain INTEGER, loss INTEGER, source TEXT, collected_at TEXT, PRIMARY KEY (day, platform));`);
 const dayOf = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
@@ -53,7 +53,21 @@ export const followerCollectors = {
     }, { wait: 6000 });
     const total = num(n); return total != null && { total, history: [] };
   },
+  async mp() {
+    const text = await withTab('https://mp.weixin.qq.com/misc/useranalysis?action=overview&lang=zh_CN', async (t) => {
+      for (let i = 0; i < 8; i++) {
+        await sleep(2000);
+        const s = await evaluate(t, `document.body.innerText`).catch(() => '');
+        if (/累计用户|用户总数|累计关注|关注用户|登录超时|请重新登录/.test(s)) return s;
+      }
+      return '';
+    }, { wait: 4000 });
+    if (!text || /登录超时|请重新登录|微信扫一扫/.test(text)) return null;
+    const total = num((text.match(/(?:累计用户|用户总数|累计关注用户|关注用户)\s*[:：]?\s*([\d,.万]+)/) || [])[1]);
+    return total != null && { total, history: [] };
+  },
   async zsz() {   // 知识站的「粉丝」= 注册用户
+    const SITE = getSite();
     if (!SITE) return null;
     const r = await withTab(SITE.admin, (t) => evaluate(t, `${get(SITE.dashboardApi)}.then(x=>({total:x.funnel.totalRegistered,trend:x.registrationTrend||[]}))`));
     return r && r.total != null && { total: r.total, todayNet: (r.trend[r.trend.length - 1] || {}).count || 0, history: r.trend.slice(0, -1).map(x => ({ day: x.date, net: x.count, gain: x.count, loss: 0 })) };

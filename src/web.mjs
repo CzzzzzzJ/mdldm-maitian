@@ -1,14 +1,26 @@
-// 麦田：本地网页。播种（发布）、长势（流量）、收成（转化）、粮仓（档案）
-import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
+// howieip-studio：本地网页。播种（发布）、长势（流量）、收成（转化）、粮仓（档案）
+import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath, pathToFileURL } from 'node:url';
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta } from './db.mjs';
 import { config } from './feishu.mjs';
-import { SITE } from './site.mjs';
+import { getSite } from './site.mjs';
 import { learnOn, learnUrl } from './learn.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
+import { prefsView, applyPrefs } from './prefs.mjs';
+import { pluginDir } from './plugin.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
+const underRoot = (f) => { const rel = path.relative(ROOT, path.resolve(f)); return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel); };
+function readBody(req, limit = 8e6) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let n = 0, done = false;
+    const fail = (e) => { if (done) return; done = true; reject(e); };
+    req.on('data', (d) => { n += d.length; if (n > limit) { fail(new Error('请求太大')); req.destroy(); return; } chunks.push(d); });
+    req.on('end', () => { if (!done) { done = true; resolve(Buffer.concat(chunks).toString('utf8')); } });
+    req.on('error', fail);
+  });
+}
 const W = config.web || { port: 8787, key: '' };
 const send = (res, code, body, type = 'application/json; charset=utf-8', extra = {}) => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', ...extra }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
 const readPj = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8')); } catch { return null; } };
@@ -51,16 +63,29 @@ function feed(n = 14) {
   });
 }
 async function chromeUp() { try { const r = await fetch(`http://127.0.0.1:${config.chromePort || 9333}/json/version`, { signal: AbortSignal.timeout(800) }); return r.ok; } catch { return false; } }
+async function kindTable() {
+  try {
+    const { KINDS } = await import(pathToFileURL(path.join(pluginDir(), 'lib', 'bundle.js')).href);
+    return KINDS || null;
+  } catch { return null; }
+}
 
 function widgetScript(req, file) {
   let base = `${req.headers['x-forwarded-proto'] || (req.headers['cf-visitor'] ? 'https' : 'http')}://${req.headers.host}`;
   try { base = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'tunnel.json'), 'utf8')).base || base; } catch {}
-  return fs.readFileSync(path.join(ROOT, 'scripts', 'widget', file), 'utf8').replace('__MAITIAN_URL__', base).replace('__WIDGET_TOKEN__', W.widgetToken);
+  return fs.readFileSync(path.join(ROOT, 'scripts', 'widget', file), 'utf8').replace('__HOWIEIP_STUDIO_URL__', base).replace('__WIDGET_TOKEN__', W.widgetToken);
 }
 const latestPublished = () => episodes().filter(e => e.schedule && Date.parse(e.schedule) <= Date.now()).sort((a, b) => Date.parse(b.schedule) - Date.parse(a.schedule))[0];
 // 手机小组件：只读汇总（粉丝、涨幅、最新一期播放、站点近 7 天），用单独的 config.web.widgetToken，只能读这一个接口
+const loggedIn = (p) => getMeta(`login:${p}`) === 'ok';
+async function health() {
+  const ids = Object.keys(NAMES).filter(id => id !== 'zsz' || getSite());
+  return { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '',
+    login: Object.fromEntries(ids.map(id => [id, getMeta(`login:${id}`) || ''])),
+    loginEver: Object.fromEntries(ids.map(id => [id, !!getMeta(`loginSince:${id}`)])) };
+}
 function widgetData() {
-  const ORDER = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram'];
+  const ORDER = ['bilibili', 'douyin', 'xhs', 'channels', 'mp', 'youtube', 'x', 'instagram'];
   const rows = db.prepare("SELECT day, platform, total FROM followers WHERE day >= date('now','localtime','-40 day') AND total IS NOT NULL ORDER BY day").all();
   const by = {}; for (const r of rows) (by[r.platform] ||= []).push(r);
   const today = new Date().toLocaleDateString('sv-SE');
@@ -68,26 +93,27 @@ function widgetData() {
   const stat = (p) => { const a = by[p]; if (!a || !a.length) return null; const last = a[a.length - 1];
     const prev = [...a].reverse().find(r => r.day < last.day), week = [...a].reverse().find(r => r.day <= ago(last.day, 7)) || (a[0] !== last ? a[0] : null);   // 记录不满 7 天就从最早一天算
     return { id: p, name: NAMES[p] || p, total: last.total, today: last.day === today && prev ? last.total - prev.total : 0, week: week ? last.total - week.total : 0, day: last.day }; };
-  const platforms = ORDER.map(stat).filter(Boolean);
+  const platforms = ORDER.filter(loggedIn).map(stat).filter(Boolean);
   const sum = k => platforms.reduce((n, p) => n + (p[k] || 0), 0);
   const now = Date.now();
   const pub = latestPublished();
   const ev = pub && episodeView(pub);
-  const days = SITE ? db.prepare('SELECT * FROM site_daily WHERE day >= ? ORDER BY day').all(ago(today, 6)) : [];
+  const siteNow = getSite();
+  const days = siteNow ? db.prepare('SELECT * FROM site_daily WHERE day >= ? ORDER BY day').all(ago(today, 6)) : [];
   const zsz = stat('zsz');
-  return { name: config.name || '麦田', owner: W.owner || '', avatar: !!W.avatar, fans: { total: sum('total'), today: sum('today'), week: sum('week') }, platforms,
+  return { name: config.name || 'howieip-studio', owner: W.owner || '', avatar: !!W.avatar, fans: { total: sum('total'), today: sum('today'), week: sum('week') }, platforms,
     latest: ev && { title: ev.short, nick: ev.nick, views: ev.views, inter: ev.inter, hours: Math.round((now - Date.parse(pub.schedule)) / 36e5) },
-    site: SITE && { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) },
+    site: siteNow && loggedIn('zsz') && { name: siteNow.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) },
     metricsDay: getMeta('metricsDay') || '', now: new Date().toISOString() };
 }
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
-const widgetPage = (code) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>麦田小组件</title>
-<style>body{font-family:-apple-system,'PingFang SC',sans-serif;margin:0;padding:22px 18px 40px;background:#f6f1e6;color:#1c1a16;line-height:1.6}h1{font-size:24px;margin:0 0 6px}ol{padding-left:20px;font-size:15px}li{margin:6px 0}
-button{width:100%;height:50px;border:0;border-radius:14px;background:#1c1a16;color:#fff;font-size:17px;font-weight:800;margin:14px 0}pre{background:#fff;border-radius:12px;padding:12px;font-size:11px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all}
-.tip{font-size:13px;color:#7a7160}</style></head><body><h1>🌾 麦田小组件</h1>
-<ol><li>App Store 安装 <b>Scriptable</b>（免费）</li><li>点下面的按钮复制脚本（自动更新的加载器，只需粘贴这一次）</li><li>打开 Scriptable → 右上角 <b>＋</b> → 粘贴 → 标题改成「麦田」；已经有「麦田」脚本的，打开它全选、粘贴覆盖</li><li>长按桌面 → 左上角 <b>＋</b> → 搜 Scriptable → 选中号 → 添加；长按小组件 → 编辑小组件 → Script 选「麦田」</li><li>锁屏：长按锁屏 → 自定 → 添加小组件 → Scriptable → 同样选「麦田」</li></ol>
-<button id="b">复制脚本</button><p class="tip">以后小组件改样式，手机上会自动用上新版，不用再粘贴。脚本里带着小组件口令，只能读汇总数字（粉丝、播放、站点近 7 天），打不开麦田别的页面。别发给别人；泄露了在 config.json 换一个 widgetToken 即可。</p>
+const widgetPage = (code) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>howieip-studio 小组件</title>
+<style>body{font-family:-apple-system,'PingFang SC',sans-serif;margin:0;padding:22px 18px 40px;background:#07080d;color:#f5f5f7;line-height:1.6}h1{font-size:24px;margin:0 0 6px}ol{padding-left:20px;font-size:15px}li{margin:6px 0}
+button{width:100%;height:50px;border:0;border-radius:14px;background:#0a84ff;color:#fff;font-size:17px;font-weight:800;margin:14px 0}pre{background:#121722;color:#f5f5f7;border-radius:12px;padding:12px;font-size:11px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.tip{font-size:13px;color:#aeaeb2}</style></head><body><h1>howieip-studio 小组件</h1>
+<ol><li>App Store 安装 <b>Scriptable</b>（免费）</li><li>点下面的按钮复制脚本（自动更新的加载器，只需粘贴这一次）</li><li>打开 Scriptable → 右上角 <b>＋</b> → 粘贴 → 标题改成「howieip-studio」；已经有「howieip-studio」脚本的，打开它全选、粘贴覆盖</li><li>长按桌面 → 左上角 <b>＋</b> → 搜 Scriptable → 选中号 → 添加；长按小组件 → 编辑小组件 → Script 选「howieip-studio」</li><li>锁屏：长按锁屏 → 自定 → 添加小组件 → Scriptable → 同样选「howieip-studio」</li></ol>
+<button id="b">复制脚本</button><p class="tip">以后小组件改样式，手机上会自动用上新版，不用再粘贴。脚本里带着小组件口令，只能读汇总数字（粉丝、播放、站点近 7 天），打不开 howieip-studio 别的页面。别发给别人；泄露了在 config.json 换一个 widgetToken 即可。</p>
 <pre id="c"></pre><script>const code=${JSON.stringify(code).replace(/</g, '\\u003c')};document.getElementById('c').textContent=code;
 document.getElementById('b').onclick=async()=>{try{await navigator.clipboard.writeText(code);b.textContent='已复制 ✓';}catch{const r=document.createRange();r.selectNodeContents(c);getSelection().removeAllRanges();getSelection().addRange(r);b.textContent='长按选中的文字复制';}};</script></body></html>`;
 
@@ -106,7 +132,12 @@ function thumb(f, w) {
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
   // 访问控制：前面挂了 Cloudflare Access（邮箱验证码）就认它的登录凭证；否则用口令（第一次带 ?key= 进来，之后用 cookie）
-  if (/^\/static\/icon-\d+\.png$/.test(u.pathname)) return send(res, 200, fs.readFileSync(path.join(DIR, 'web', path.basename(u.pathname))), 'image/png', { 'cache-control': 'max-age=86400' });   // 主屏幕图标不用登录
+  if (u.pathname === '/icon' || /^\/static\/icon-\d+\.png$/.test(u.pathname)) {   // 标签页和主屏幕图标不用登录；有头像就用头像
+    const rel = config.web && config.web.avatar, f = rel && path.resolve(ROOT, rel);
+    if (f && underRoot(f) && fs.existsSync(f)) return send(res, 200, fs.readFileSync(f), /\.png$/i.test(f) ? 'image/png' : /\.webp$/i.test(f) ? 'image/webp' : 'image/jpeg');
+    const fallback = path.join(DIR, 'web', u.pathname === '/icon' ? 'icon-180.png' : path.basename(u.pathname));
+    return send(res, 200, fs.readFileSync(fallback), 'image/png', { 'cache-control': 'max-age=86400' });
+  }
   if (u.pathname === '/api/widget/img') {   // 小组件图片：头像（config.web.avatar）或最新一期封面缩略图，同一个只读口令
     if (!W.widgetToken || !tokenEq(u.searchParams.get('t'), W.widgetToken)) return send(res, 401, '');
     let f = null;
@@ -116,9 +147,13 @@ async function handle(req, res) {
     const t = thumb(f, Math.min(800, +u.searchParams.get('w') || 400));
     return send(res, 200, fs.readFileSync(t || f), t ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=1800' });
   }
-  if (u.pathname === '/api/widget/code') return W.widgetToken && tokenEq(u.searchParams.get('t'), W.widgetToken) ? send(res, 200, widgetScript(req, 'maitian-widget.js'), 'text/javascript; charset=utf-8') : send(res, 401, '');   // 加载器每次刷新来取最新代码
+  if (u.pathname === '/api/widget/code') return W.widgetToken && tokenEq(u.searchParams.get('t'), W.widgetToken) ? send(res, 200, widgetScript(req, 'howieip-studio-widget.js'), 'text/javascript; charset=utf-8') : send(res, 401, '');   // 加载器每次刷新来取最新代码
   if (u.pathname === '/api/widget') return W.widgetToken && tokenEq(u.searchParams.get('t') || req.headers['x-widget-token'], W.widgetToken) ? send(res, 200, widgetData()) : send(res, 401, { error: '小组件口令不对' });
-  if (u.pathname === '/manifest.webmanifest') return send(res, 200, { name: config.name || '麦田', short_name: config.name || '麦田', start_url: '/', display: 'standalone', background_color: '#efe7d8', theme_color: '#efe7d8', icons: [{ src: '/static/icon-512.png', sizes: '512x512', type: 'image/png' }] }, 'application/manifest+json');
+  if (u.pathname === '/manifest.webmanifest') {
+    const rel = config.web && config.web.avatar, f = rel && path.resolve(ROOT, rel), has = f && underRoot(f) && fs.existsSync(f);
+    const type = has ? (/\.png$/i.test(f) ? 'image/png' : /\.webp$/i.test(f) ? 'image/webp' : 'image/jpeg') : 'image/png';
+    return send(res, 200, { name: config.name || 'howieip-studio', short_name: config.name || 'howieip-studio', start_url: '/', display: 'standalone', background_color: '#07080d', theme_color: '#07080d', icons: [{ src: '/icon', sizes: '512x512', type }] }, 'application/manifest+json');
+  }
   // 飞书验证码登录（config.web.login = "feishu"）：/login 页面和接口不需要先登录
   const LOGIN = W.login === 'feishu' && config.feishuWebhook;
   if (LOGIN && await handleLogin(req, res, u, send)) return;
@@ -132,21 +167,32 @@ async function handle(req, res) {
   if (u.pathname === '/p') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'pages.html')), 'text/html; charset=utf-8');
   if (u.pathname === '/board') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'board.html')), 'text/html; charset=utf-8');
   if (u.pathname === '/') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'board.html')), 'text/html; charset=utf-8');
-  if (u.pathname === '/widget') {   // 小组件安装页（已登录才能看）：脚本里填好麦田地址和小组件口令，手机上一键复制
+  if (u.pathname === '/widget') {   // 小组件安装页（已登录才能看）：脚本里填好 howieip-studio 地址和小组件口令，手机上一键复制
     if (!W.widgetToken) return send(res, 404, '<meta charset="utf-8">没配 config.web.widgetToken', 'text/html; charset=utf-8');
-    return send(res, 200, widgetPage(widgetScript(req, 'maitian-loader.js')), 'text/html; charset=utf-8');
+    return send(res, 200, widgetPage(widgetScript(req, 'howieip-studio-loader.js')), 'text/html; charset=utf-8');
   }
   if (u.pathname === '/api/overview') {
-    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
+    const siteNow = getSite();
+    const kinds = await kindTable();
+    return send(res, 200, { name: config.name || 'howieip-studio', siteOn: !!siteNow, learn: learnOn(config) ? learnUrl('howieip-studio-board') : '', siteName: siteNow ? siteNow.name : '', siteLogo: !!(siteNow && config.site.logo), board: config.board && config.board.url, driver: config.driver,
+      ...(kinds ? { kinds } : {}),
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
       site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
         campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },
       metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all(),
       followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
       samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(),
-      feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', login: Object.fromEntries((config.keepAlive || []).map(k => [k, getMeta(`login:${k}`) || '']) ) }, now: new Date().toISOString() });
+      feed: feed(), health: await health(), now: new Date().toISOString() });
   }
-  if (u.pathname === '/site-logo') { const f = SITE && config.site.logo && path.resolve(ROOT, config.site.logo); return f && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
+  if (u.pathname === '/site-logo') { const f = getSite() && config.site.logo && path.resolve(ROOT, config.site.logo); return f && underRoot(f) && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
+  if (u.pathname === '/avatar') { const f = config.web && config.web.avatar && path.resolve(ROOT, config.web.avatar); if (!f || !underRoot(f) || !fs.existsSync(f)) return send(res, 404, ''); return send(res, 200, fs.readFileSync(f), /\.png$/i.test(f) ? 'image/png' : /\.webp$/i.test(f) ? 'image/webp' : 'image/jpeg', { 'cache-control': 'no-store' }); }
+  if (u.pathname === '/api/prefs' && req.method === 'GET') return send(res, 200, prefsView());
+  if (u.pathname === '/api/prefs' && req.method === 'POST') {
+    let raw; try { raw = await readBody(req); } catch (e) { return send(res, 400, { error: e.message || '请求太大' }); }
+    let body; try { body = JSON.parse(raw || '{}'); } catch { return send(res, 400, { error: '请求格式不对' }); }
+    try { applyPrefs(body); } catch (e) { return send(res, 400, { error: e.message || '没保存' }); }
+    return send(res, 200, prefsView());
+  }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
   if (u.pathname === '/cover' || u.pathname === '/shot') {
     const ep = getEpisode(u.searchParams.get('id')); if (!ep) return send(res, 404, '');
@@ -162,7 +208,7 @@ async function handle(req, res) {
     let body = ''; req.on('data', d => body += d); req.on('end', () => {
       let a; try { a = JSON.parse(body); } catch { return send(res, 400, { error: '请求格式不对' }); }
       const map = { sync: ['sync', a.id], metrics: a.id ? ['metrics', a.id] : ['metrics'], doctor: ['doctor', '--notify'], board: ['board'], followers: ['followers'],
-        mark: ['mark', a.id, a.platform, a.state, a.note || '在麦田里标记', ...(a.url ? ['--url', a.url] : [])] };
+        mark: ['mark', a.id, a.platform, a.state, a.note || '在 howieip-studio 里标记', ...(a.url ? ['--url', a.url] : [])] };
       const argv = map[a.type];
       if (!argv || argv.some(x => x === undefined || x === null || x === '')) return send(res, 400, { error: '不支持的操作' });
       if (a.type === 'mark' && (a.state !== 'published' || !getEpisode(a.id) || !NAMES[a.platform])) return send(res, 400, { error: '状态不对' });
@@ -181,7 +227,7 @@ async function handle(req, res) {
 export function startWeb() {
   const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: e.message }); } catch {} }); });
   initLogin(ROOT);
-  srv.listen(W.port, '0.0.0.0', () => console.log(`麦田网页：http://localhost:${W.port}/?key=${W.key}`));
-  srv.on('error', (e) => console.error('麦田网页没起来：' + e.message));
+  srv.listen(W.port, '0.0.0.0', () => console.log(`howieip-studio 网页：http://localhost:${W.port}/?key=${W.key}`));
+  srv.on('error', (e) => console.error('howieip-studio 网页没起来：' + e.message));
   return srv;
 }

@@ -1,10 +1,11 @@
 {
-  "name": "mdldm-maitian",
+  "name": "howieip-studio",
   "version": "0.4.0",
-  "description": "麦田：自媒体多平台发布中控与数据监控（B站/抖音/小红书/视频号/YouTube/X）",
+  "description": "howieip-studio：自媒体多平台发布中控与数据监控（B站/抖音/小红书/视频号/YouTube/X）",
   "type": "module",
+  "author": "Howie",
   "license": "MIT",
   "engines": { "node": ">=22.5" },
-  "bin": { "maitian": "src/hub.mjs" },
+  "bin": { "howieip-studio": "src/hub.mjs" },
   "repository": { "type": "git", "url": "https://github.com/CzzzzzzJ/mdldm-maitian.git" }
 }
