@@ -23,7 +23,8 @@ node --test --test-name-pattern '启用判定' tests/site.test.mjs
 
 node src/demo.mjs                               # 假数据大屏 http://localhost:8788/?key=demo
 node src/init.mjs                               # 交互式安装向导（会改 config、装 launchd）
-node src/hub.mjs doctor [--only a,b] [--quiet]  # 只检查登录态，不上传、不填写
+node src/hub.mjs login [--target 账号键 | --only a,b]            # 打开专用 Chrome 的登录页
+node src/hub.mjs doctor [--target 账号键 | --only a,b] [--quiet] # 只检查登录态，不上传、不填写
 node src/hub.mjs plan [工程目录]
 node src/hub.mjs run <工程目录> [--only x,zsz] [--force] [--now]
 node src/hub.mjs status [id] [--logs]
@@ -40,6 +41,13 @@ node src/make-publish.mjs <发布素材.md> <工程目录>
 node src/validate.mjs <工程目录>
 ```
 
+`--target` 只选择一个已启用的平台或账号，不能与 `--only` 一起用。B 站主号的键是 `bilibili`，副号的键是 `bilibili@<id>`（用配置中的账号 ID，不是显示名；副号需要 `driver: direct`）。例如：
+
+```bash
+node src/hub.mjs login --target bilibili
+node src/hub.mjs doctor --target 'bilibili@second' --quiet   # 副号 ID 为 second 时
+```
+
 `login`、`run`、`metrics`、`followers`、`doctor`、`daemon` 会启动专用 Chrome（默认 CDP `9333`）并操作已登录的创作者后台。不要为了验证代码去跑它们，除非用户明确要求。
 
 ## 架构
@@ -53,6 +61,8 @@ node src/validate.mjs <工程目录>
 浏览器驱动在 `src/driver.mjs`：默认 `driver: direct`，用 `src/chrome-shim.mjs` 在 Node 里模拟插件要的 `chrome.tabs` / `chrome.debugger`，再动态 `import` 插件目录里的 `lib/publish.js`。`driver: plugin` 则走 `src/bridge.mjs` 的开发桥。插件目录由 `src/plugin.mjs` 决定：`plugin: store`（默认）读专用 Chrome 资料目录里商店版的最新版本；`plugin: local` 用 `pluginDir`。字段字数、禁词、封面规则也从插件的 `lib/bundle.js` 来，`validate.mjs` 只额外检查成片 faststart（moov 在文件头）。改「某个平台怎么填表」不在本仓库，在发布助手里。
 
 平台 id：`bilibili`、`douyin`、`xhs`、`channels`、`youtube`、`x`、`instagram`、`threads`，自有站点是 `zsz`。`config.auto` 里的平台回读核对后自动提交一次；`config.manual`（国内四家）填完停在 `awaiting_user`，最后一下留给人点。`config.batches` 控制上传批次，一次传太多会抢带宽。账号作品流量（`account-*.mjs`、`hub metrics-accounts`）和发布工程是两套数据，采集不会创建待发布任务。B 站副号只在 `bilibiliAccounts` 里，不参与发布。
+
+「系统 → 平台」里的 B 站**单账号停用**只影响该账号的登录入口、日常/手动体检和账号作品流量采集，不会禁止主号投稿。发布前一晚的体检按本期实际要发布的平台检查：只要本期计划发 B 站且整个平台仍启用，即使主号账号行已停用，也会检查主号。如果要停掉 B 站投稿，请在「管理B站账号」里选「停用整个B站」（写入 `config.disabled`）；之后启用整个平台不会取消之前的单账号停用。
 
 可选扩展：`src/*.local.mjs` 被 gitignore。`examples/wechat/` 是公众号接入示例（非官方，页面里直接调后台接口、只建草稿）。只有 `config.batches` 含 `wechat` 时，`hub.mjs` / `web.mjs` 才会把它登记进平台列表。复制示例后用 `node src/hub.local.mjs` 代替 `hub.mjs`。
 
