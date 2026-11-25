@@ -18,7 +18,7 @@ function fixture(t) {
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"module"}');
   const config = {
     plugin:'local', pluginDir:dir, rootPath:dir, chromePort:24101, chromeProfile:path.join(dir, 'primary'),
-    disabled:['douyin','xhs','channels','youtube','instagram','x'], learnLinks:false,
+    disabled:['douyin','xhs','channels','youtube','instagram','x','threads'], learnLinks:false,
     bilibiliAccounts:[{id:'default',name:'主号',uid:'101'}, {id:'second',name:'副号',uid:'202',chromePort:24202,chromeProfile:path.join(dir, 'secondary')}],
   };
   const settings = path.join(dir, 'config.json'), trace = path.join(dir, 'trace'), database = path.join(dir, 'hub.db');
@@ -43,10 +43,20 @@ function fixture(t) {
     export const closeConnection = () => {};
     export const chrome = { record, tabs: { create: async ({url}) => ({id:record('tab',url)}), remove:async () => {} } };
   `);
-  fs.writeFileSync(path.join(lib, 'cdp.js'), `export const evaluate = async tab =>
-    tab === 24101 ? (process.env.SYSTEM_PRIMARY_UID ?? '101') : (process.env.SYSTEM_SECOND_UID ?? '202');`);
+  fs.writeFileSync(path.join(lib, 'cdp.js'), `
+    export const evaluate = async (tab, expr) => {
+      if (expr?.includes('1.0/profile')) return null;
+      if (expr?.includes('document') && !expr.includes('isLogin')) { chrome.record('evaluate',expr); return null; }
+      return tab === 24101 ? (process.env.SYSTEM_PRIMARY_UID ?? '101') : (process.env.SYSTEM_SECOND_UID ?? '202');
+    };
+    export const click = () => { chrome.record('click'); throw Error('browser click forbidden in fixture'); };
+    export const send = async (tab,method) => {
+      if (method !== 'Page.captureScreenshot') throw Error('unexpected CDP command');
+      return {data:''};
+    };
+  `);
   fs.writeFileSync(path.join(lib, 'publish.js'), `
-    export const ADAPTERS = {bilibili:{}, xhs:{}};
+    export const ADAPTERS = {bilibili:{}, xhs:{}, threads:{}};
     export const preflight = async ids => {
       chrome.record('preflight', ids);
       return Object.fromEntries(ids.map(id => [id, {
@@ -282,4 +292,25 @@ test('run still fills Bilibili on the primary profile with its account switch of
   assert.deepEqual(run.events.filter(e => ['preflight','run'].includes(e[0])).map(e => [e[0],e[1],e[3]]),
     [['preflight',24101,['bilibili']], ['run',24101,['bilibili']]]);
   assert.equal(f.task(), 'awaiting_user');
+});
+
+
+test('scheduled Threads is included in the night check but stops at manual scheduling on run', t => {
+  const f = eveningFixture(t);
+  f.config.disabled = f.config.disabled.filter(id => id !== 'threads');
+  f.config.auto = ['threads']; // Not in the existing config's batches or manual list.
+  f.plan({bilibili:{}, threads:{text:'Schedule this Threads post manually'}});
+  const eve = f.evening();
+  assert.equal(f.status('threads'), 'ok');
+  assert.equal(f.status('bilibili'), 'ok');
+  assert.ok(eve.events.some(([op,port,,ids]) => op === 'preflight' && port === 24101 && ids.includes('threads')));
+  assert.ok(eve.events.every(([,port]) => port !== 24202));
+
+  const run = f.cli(['run', f.project, '--only', 'threads']);
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(run.events.some(([op,port,,ids]) => op === 'run' && port === 24101 && ids.includes('threads')));
+  assert.ok(!run.events.some(([op]) => op === 'click'));
+  const state = f.sql(db => db.prepare("SELECT state,detail FROM tasks WHERE episode_id='eve' AND platform='threads'").get());
+  assert.equal(state.state, 'awaiting_user');
+  assert.match(state.detail, /手动设定时/);
 });

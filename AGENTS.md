@@ -52,7 +52,7 @@ node src/validate.mjs <工程目录>
 
 浏览器驱动在 `src/driver.mjs`：默认 `driver: direct`，用 `src/chrome-shim.mjs` 在 Node 里模拟插件要的 `chrome.tabs` / `chrome.debugger`，再动态 `import` 插件目录里的 `lib/publish.js`。`driver: plugin` 则走 `src/bridge.mjs` 的开发桥。插件目录由 `src/plugin.mjs` 决定：`plugin: store`（默认）读专用 Chrome 资料目录里商店版的最新版本；`plugin: local` 用 `pluginDir`。字段字数、禁词、封面规则也从插件的 `lib/bundle.js` 来，`validate.mjs` 只额外检查成片 faststart（moov 在文件头）。改「某个平台怎么填表」不在本仓库，在发布助手里。
 
-平台 id：`bilibili`、`douyin`、`xhs`、`channels`、`youtube`、`x`、`instagram`，自有站点是 `zsz`。`config.auto` 里的平台回读核对后自动提交一次；`config.manual`（国内四家）填完停在 `awaiting_user`，最后一下留给人点。`config.batches` 控制上传批次，一次传太多会抢带宽。账号作品流量（`account-*.mjs`、`hub metrics-accounts`）和发布工程是两套数据，采集不会创建待发布任务。B 站副号只在 `bilibiliAccounts` 里，不参与发布。
+平台 id：`bilibili`、`douyin`、`xhs`、`channels`、`youtube`、`x`、`instagram`、`threads`，自有站点是 `zsz`。`config.auto` 里的平台回读核对后自动提交一次；`config.manual`（国内四家）填完停在 `awaiting_user`，最后一下留给人点。`config.batches` 控制上传批次，一次传太多会抢带宽。账号作品流量（`account-*.mjs`、`hub metrics-accounts`）和发布工程是两套数据，采集不会创建待发布任务。B 站副号只在 `bilibiliAccounts` 里，不参与发布。
 
 可选扩展：`src/*.local.mjs` 被 gitignore。`examples/wechat/` 是公众号接入示例（非官方，页面里直接调后台接口、只建草稿）。只有 `config.batches` 含 `wechat` 时，`hub.mjs` / `web.mjs` 才会把它登记进平台列表。复制示例后用 `node src/hub.local.mjs` 代替 `hub.mjs`。
 

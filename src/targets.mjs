@@ -2,7 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 
-export const PLATFORM_NAMES = { bilibili: 'B站', douyin: '抖音', xhs: '小红书', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', zsz: '知识站' };
+export const PLATFORM_NAMES = { bilibili: 'B站', douyin: '抖音', xhs: '小红书', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', threads: 'Threads', zsz: '知识站' };
 export const basePlatform = id => String(id).split('@')[0];
 const homePath = p => path.resolve(p.replace(/^~(?=\/|$)/, os.homedir()));
 // Keep the existing platform switch authoritative. Targets are for account-level
