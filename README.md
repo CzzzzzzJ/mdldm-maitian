@@ -290,23 +290,6 @@ iPhone 桌面 / 锁屏常驻显示全平台粉丝、今日涨粉、最新一期�
 
 觉得有用就点个 ⭐ Star，这是我继续改下去的动力；遇到问题直接提 [Issue](https://github.com/CzzzzzzJ/mdldm-maitian/issues)。
 
-## 核心团队
-
-<table>
-<tr>
-<td align="center" width="33%"><img src="docs/readme/team-maidang.jpg" width="120" alt="麦当"><br><b>麦当</b><br><sub>发起人 · 产品</sub></td>
-<td align="center" width="33%"><img src="docs/readme/team-adai.jpg" width="120" alt="阿呆"><br><b>阿呆</b><br><sub>技术负责人 · <a href="https://github.com/ymstar">@ymstar</a></sub></td>
-<td align="center" width="33%"><img src="docs/readme/team-niba.jpg" width="120" alt="泥巴"><br><b>泥巴</b><br><sub>内容与增长负责人</sub></td>
-</tr>
-<tr>
-<td valign="top"><sub>AI 教学博主，主做 0 基础 AI Agent 教程。麦田是照着自己的发布流程一点点搭起来的，每期视频都用它分发、采数据、看转化。</sub></td>
-<td valign="top"><sub>AI 全栈工程师 &amp; 独立开发者，专注系统架构设计与工程落地。审社区 PR 和 Issue、管发版节奏。相信好的技术，终究要落到结果上。</sub></td>
-<td valign="top"><sub>自媒体创作者。先听懂用户真正需要什么，再想怎么把东西做出来、怎么用内容让需要的人找到它。</sub></td>
-</tr>
-</table>
-
-还有一起写代码的 [社区贡献者](https://github.com/CzzzzzzJ/mdldm-maitian/graphs/contributors)，谢谢每一个 PR 和 Issue。企业部署、培训和定制，见官网 [maitian.mdldm.club](https://maitian.mdldm.club/#business)。
-
 ## Star History
 
 <a href="https://www.star-history.com/?repos=czzzzzzj%2Fmdldm-maitian&type=date&releases=&legend=top-left">
