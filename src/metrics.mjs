@@ -3,14 +3,29 @@ import { evaluate, withTab, sleep } from './driver.mjs';
 import { SITE } from './site.mjs';
 
 const J = JSON.stringify;
-// "1.2万" "6,017" "5.3K" → 数字
+// "1.2万" "578.3 萬" "6,017" "5.3K" → 数字
 export function num(s) {
   if (s == null) return null; s = String(s).replace(/,/g, '').trim();
-  const m = s.match(/^([\d.]+)\s*(万|亿|K|M|w)?/i); if (!m) return null;
-  const k = { '万': 1e4, 'w': 1e4, '亿': 1e8, 'k': 1e3, 'm': 1e6 }[(m[2] || '').toLowerCase()] || 1;
+  const m = s.match(/^([\d.]+)\s*(万|萬|亿|K|M|w)?/i); if (!m) return null;
+  const k = { '万': 1e4, '萬': 1e4, 'w': 1e4, '亿': 1e8, 'k': 1e3, 'm': 1e6 }[(m[2] || '').toLowerCase()] || 1;
   return Math.round(parseFloat(m[1]) * k);
 }
 const idOf = (url, re) => ((url || '').match(re) || [])[1] || '';
+
+// Threads 网页的文案跟界面语言走。繁体界面的赞是「讚」（台湾）或「讚好」（香港），转发是「轉發」。
+// 繁体界面的评论按钮和「取消赞」要登录后才看得到，还没有验证，先不加。
+export const TH_ACTIONS = {
+  likes: ['赞', '取消赞', '讚', '讚好', 'Like', 'Unlike'],
+  comments: ['回复', 'Reply'],
+  reposts: ['转发', '轉發', 'Repost'],
+  shares: ['分享', 'Share'],
+};
+// 主页上的粉丝数：「578.3 万位粉丝」「578.3 萬位粉絲」「5.7M followers」
+export const TH_FOLLOWERS = /([\d,.]+\s*[万萬KM]?)\s*(?:位粉丝|粉丝|位粉絲|followers)/i;
+// 在串文页里跑：按标签找到四个按钮，读旁边的数字（数字为 0 时不显示）
+export const thActionsJs = `(()=>{const L=${J(TH_ACTIONS)};const o={};let hit=0;
+      for(const [k,ls] of Object.entries(L)){const s=[...document.querySelectorAll('svg')].find(s=>ls.includes(s.getAttribute('aria-label')||(s.querySelector('title')||{}).textContent||''));const b=s&&s.closest('[role=button],button');if(!b){o[k]=null;continue}hit++;o[k]=b.innerText.trim()||'0'}
+      return hit?o:null})()`;
 
 export const collectors = {
   async bilibili({ url, p }) {
@@ -70,6 +85,12 @@ export const collectors = {
       const r=await fetch('/api/v1/media/'+pk+'/info/',{credentials:'include',headers:{'X-IG-App-ID':'936619743392459'}});if(!r.ok)return null;const it=((await r.json()).items||[])[0];
       return it?{views:it.play_count??it.ig_play_count,likes:it.like_count,comments:it.comment_count,shares:it.reshare_count}:null})()`), { wait: 6000 });
     return m && { views: m.views ?? null, likes: m.likes ?? null, comments: m.comments ?? null, shares: m.shares ?? null };
+  },
+  async threads({ url }) {   // 串文页底部的赞、回复、转发、分享（数字为 0 时不显示）；网页上看不到播放数，留空
+    if (!/\/post\//.test(url || '')) return null;
+    const m = await withTab(url, (t) => evaluate(t, thActionsJs), { wait: 8000 });
+    if (!m) return null;
+    return { views: null, likes: num(m.likes), comments: num(m.comments), shares: num(m.reposts), extra: { 分享: num(m.shares) } };
   },
   async zsz({ url, p }) {
     const id = idOf(url, /courseId=(\w+)/);

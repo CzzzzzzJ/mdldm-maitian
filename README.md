@@ -186,7 +186,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 | `rootPath` / `nasUrl` | 发布工程根目录；NAS 掉线或被挂到「…-1」时守护进程会自己卸掉重挂 |
 | `batches` | 上传批次。一次传太多平台会互相抢带宽导致超时，建议国内两两一批 |
 | `auto` / `manual` | 自动提交 / 等你点发布的平台 |
-| `schedules.sales` / `schedules.daemon` | 小鹅通同步和守护巡检各自默认每 60 分钟运行。在「系统 → 自动调度」分别选择间隔分钟数或每日的北京时间，保存后生效 |
+| `schedules.sales` / `schedules.daemon` | 小鹅通同步和守护巡检各自默认每 60 分钟运行。在「系统 → 自动调度」分别选择间隔分钟数或每日的北京时间，保存后生效；发布前登录检查与计划发现不受例行巡检时间限制 |
 | `keepAlive` | 容易掉登录的平台（视频号），定时刷一下保活 |
 | `disabled` | 停用的平台（如 `["instagram"]`）：不体检、不打开登录页、不发布、不采粉丝。网页「系统 → 平台」里也能开关 |
 | `bilibiliAccounts` | 可选的 B 站采集账号配置；这项配置不改变发布账号或发布流程 |
