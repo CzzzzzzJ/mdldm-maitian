@@ -95,6 +95,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-window
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-autostart.ps1 -Uninstall
 ```
 
+计划任务在守护进程异常退出后每隔 1 分钟尝试重启，最多 3 次。运行输出追加到仓库内的 `data/daemon.log`。安装后大屏迟迟打不开时，可查看这份日志和任务计划程序里的任务状态。
+
+计划任务使用注册时的 `node.exe` 路径。用 nvm 等工具更换 Node.js 后，如果可执行文件路径变了，请在能找到新 `node.exe` 的 PowerShell 里重跑上面的启用命令，更新现有任务。
+
 <p align="center"><img src="https://github.com/CzzzzzzJ/mdldm-maitian/releases/download/media/maitian-install.gif" width="720" alt="一行安装演示" /></p>
 
 ### 手动安装
