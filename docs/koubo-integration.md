@@ -346,3 +346,62 @@ node src/koubo-bridge.mjs --selftest
 2. 单期详情 `episode=0` → 显示「第 0 期」→ 改为按真实排序取期号。
 3. 时间戳无时区 → 麦田 `when()` 用 `new Date(iso)` 解析，按 UTC 偏 8 小时（显示 `1/22 02:49`）→ `_iso()` 改为带时区 ISO（`+08:00`），日志/feed 同步。
 4. iframe 内导航用绝对路径 → 点页签会跳出 iframe 到顶层 → 改为相对路径 `pages.html#/xxx`。
+
+---
+
+## 十、轮14：专用 Edge 登录态采集 + 平台图标即登录入口（2026-11-27）
+
+### 10.1 用户诉求与结论
+1. **「接 Microsoft Edge 浏览器不行吗？采集数据不能用吗？」** → 可以，且本机已装 **Edge 158.0.4370.33**（`C:/Program Files (x86)\Microsoft\Edge\Application\msedge.exe`）。Edge 与 Chrome 同为 Chromium 内核，**CDP 完全通用**（麦田的 `chrome-shim.mjs` 就是原生 WebSocket 直连 CDP，零 npm 依赖）。
+2. **「登录各平台的入口机制能否加在数据大屏当中，点击抖音图标直接弹出登录界面」** → 已实现：平台图标（`.lg`）改为可点登录入口，鼠标悬停显示「点击登录 X（专用浏览器，脚本不接触密码）」。
+
+### 10.2 2026 年的硬约束（社区调研结论，必须遵守）
+* **Chrome/Edge 136+ 对默认用户目录禁用 `--remote-debugging-port`**，必须配 **独立 `--user-data-dir`**；144+ 还需用户在 `chrome://inspect` 授权。→ 本实现用独立 profile `C:/zm6-koubo/browser/edge-profile`，与日常 Edge 完全隔离（也不碰日常浏览的 History/Login Data）。
+* **不要用 `puppeteer-extra-plugin-stealth`**（2023-03 后未维护，补丁本身成为指纹）；2026 主流是 patchright / nodriver / camoufox（改驱动或改引擎）。本场景是"接管真实浏览器"，TLS/JA4 指纹天然真实，无需任何 stealth 补丁。
+* 反检测层级顺序：IP 信誉 → TLS/JA4 → CDP 协议痕迹（`Runtime.enable`）→ JS 指纹 → 无头 vs 有头 → 行为关联。**有头 + 真实浏览器 + 最小化窗口**是关键。
+* 安全：调试端口只绑 127.0.0.1；只关自己开的 target，**绝不 `browser.close()`**；至少保留 1 个页签；`127.0.0.1` 访问要绕开本机代理（社区常见坑：9222 被 `HTTP_PROXY` 截走返回 502）。
+* 登录模型：**人负责登录（扫码/短信/滑块），脚本只负责操作**——脚本全程不接触密码。
+
+### 10.3 落地（口播侧新增两个模块）
+| 文件 | 作用 |
+|---|---|
+| `智漫6-orchestrator/koubo_cdp.mjs` | **零依赖 CDP 客户端**（Node 24 原生 WebSocket）：启动独立 profile 的 Edge（端口 9333）→ `Target.createTarget/attachToTarget` → `Page.navigate` → 页面上下文 `Runtime.evaluate`（带 cookie）；`detached:true` 让浏览器**脱离 Node 生命周期独立常驻**（否则 Node 一退出，Windows 作业对象会连带杀掉 Edge，人来不及扫码）；登录场景 `keepOpen=true` **保留标签页**；就绪等待用 **CDP 事件 `Page.loadEventFired`**（不用 `Runtime.evaluate` 轮询——后台 SPA 忙时 evaluate 会挂满 30s 超时） |
+| `智漫6-orchestrator/koubo_browser.py` | Python 包装：`status/open_login/collect/stop`，`status_short` 带 60 秒缓存（大屏 60s 轮询不该每次起 Node） |
+
+### 10.4 采集能力（真实登录态读取，页面上下文带 cookie）
+* **B站**：`fetch('/x/web/archives?status=pubed&pn=1&ps=30',{credentials:'include'})` → 作品标题/BV/播放/赞/评/藏/转（麦田同一条接口）
+* **抖音/小红书/视频号/公众号/快手/YouTube**：后台为前端渲染，读 DOM（只取已渲染内容，不逆向签名）
+* **X / Instagram / Threads**：无稳定后台接口 → 诚实 `need_setup`，不伪造
+
+### 10.5 登录态判定（四态，诚实不冒充）
+| 判定 | 依据 |
+|---|---|
+| `logged_in` | **权威**：平台官方接口判定（B站创作中心 `/x/web-interface/nav` 的 `data.isLogin`） |
+| `likely_in` | 只看到后台界面外壳（可能只是 SPA 渲染了导航），**不断言已登录** |
+| `logged_out` | URL/标题命中登录特征，或页面有密码输入框 |
+| `unknown` | 两者都没有 → 无法判定 |
+
+### 10.6 大屏接入（不改麦田结构，只加入口与口径）
+* 平台图标 → 可点登录入口：`mt.js` 与 `board.html` 的 `logo(p)` 增加 `data-login`，点击 → `POST /api/koubo/maitian/action {type:'login'}` → 起专用 Edge 打开该平台登录页 → 提示「B站：未登录（登录页已保留在专用浏览器窗口，扫码后即可采集）」。
+* 麦田系统页原生按钮全部真接通：`去登录`→`login`、`检查`→`doctor`（报真实浏览器路径/版本/端口）、`采流量`→`metrics`（真跑 radar）、`采账号流量`→`metrics-accounts`（登录态采集）、`采粉丝`→诚实说明口播不采粉丝。
+* 顶栏状态灯改为真实口径：`专用浏览器 Edg/158.0.4370.33`、`采集源 N 项待登录`（不再写死"平台登录正常"）。
+
+### 10.7 本轮修掉的 bug（都是实测发现的）
+1. **Edge 随 Node 一起被杀**：`detached:false` → Node 退出时 Windows 作业对象连带终止浏览器 → 改 `detached:true` + `unref()`。
+2. **登录页被立刻关掉**：`withPage` 收尾无条件 `Target.closeTarget` → 登录场景改 `keepOpen=true`，标签页留给用户扫码。
+3. **每次调用卡 31 秒**：`CDP.send()` 的 30 秒超时定时器**成功后未清除** → 进程打印完结果仍挂 30 秒才退出（Python `subprocess.run` 等进程结束 → 端点耗时 32 秒）。修复为成功/失败都 `clearTimeout`；`withTimeout` 的 guard 定时器同样清除。→ **端点耗时 32s → 0~1.3s**。
+4. **就绪等待挂满超时**：用 `Runtime.evaluate` 轮询 `document.readyState`，后台 SPA 忙时 evaluate 挂死 → 改为等待 CDP 事件 `Page.loadEventFired`。
+5. **登录态假阳性**：只看 URL/标题无 "login" 就判已登录 → 改为四态判定 + B站官方接口权威判定。
+6. **采集 need_login 被通用错误分支抢先** → 调整判断顺序；`status_short` 补 `port`；`_health()` 重复调用导致每次 overview 起两次 Node → 改为一次 + 60 秒缓存。
+
+### 10.8 验收（真浏览器 + 真 Edge 实跑）
+* 点大屏 B站图标 → **1.2 秒**返回「B站：未登录（登录页已保留在专用浏览器窗口，扫码后即可采集）」。
+* 专用 Edge 进程实测：`msedge.exe --remote-debugging-port=9333 --user-data-dir=C:/zm6-koubo/browser/edge-profile`，CDP 端点 `Edg/158.0.4370.33`；窗口内**同时保留 3 个真实登录页**：B站「账号登录」passport.bilibili.com、视频号助手 channels.weixin.qq.com/login.html、抖音创作者中心 creator.douyin.com。
+* 端点计时：`login/douyin` 1.3s、`login/bilibili` 1.0s、`doctor` 0.0s、`metrics-accounts/bilibili` 1.3s（未登录→诚实提示）。
+* 端点：`/api/koubo/browser/status`、`/api/koubo/browser/login`、`/api/koubo/browser/collect`、`/api/koubo/maitian/action` 全部 200。
+* 不回归：L1 **47/47**、L2 **33/33**（新增浏览器模块与相关检查）。
+
+### 10.9 诚实边界
+* 采集依赖**你本人先在专用 Edge 里完成扫码登录**；未登录时返回「尚未登录：先点该平台图标登录」，**不绕过平台风控、不逆向签名、不伪造数据**。
+* 实测抖音在专用实例中弹出了自己的风控校验页（`rc-verifycenter`），这是平台侧正常风控，脚本不做对抗。
+* 调试端口仅 127.0.0.1；profile 与日常浏览隔离；用完可 `node koubo_cdp.mjs stop` 断开（不关用户窗口）。
