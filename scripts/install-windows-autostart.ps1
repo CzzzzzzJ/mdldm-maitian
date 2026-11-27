@@ -1,4 +1,12 @@
-﻿param(
+﻿# 麦田 · Windows 登录自启
+# 给当前 Windows 用户注册计划任务，登录后运行 node src\hub.mjs daemon。
+# 在仓库根目录运行 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-autostart.ps1
+#   不加参数    注册登录自启
+#   -StartNow   注册后立即启动，并检查大屏端口
+#   -Uninstall  停止并移除自启任务
+# 安装向导通过 -NodePath 传入当前 Node.js 路径，手动运行时默认从 PATH 查找 node.exe。
+
+param(
   [switch]$Uninstall,
   [switch]$StartNow,
   [string]$NodePath
