@@ -30,12 +30,21 @@ const ok = (t) => console.log(`  ✅ ${t}`), bad = (t) => console.log(`  ❌ ${t
 const home = (p) => p.replace(/^~(?=\/|$)/, os.homedir());
 
 const WIN = process.platform === 'win32';
+// 保留管道安装的答题顺序，登录自启通过交互确认或单独运行脚本启用。
+const askWindowsAutostart = () => WIN && tty && yes('启用 Windows 登录自启，并现在启动麦田？', false);
+function installWindowsAutostart() {
+  const { status, error, signal } = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', path.join(ROOT, 'scripts', 'install-windows-autostart.ps1'), '-StartNow', '-NodePath', process.execPath], { stdio: 'inherit' });
+  if (status === 0) return true;
+  bad(`Windows 登录自启注册失败：${error?.message || `PowerShell 退出状态 ${status ?? signal}`}`);
+  tip('可继续手动启动麦田，或按 README 的 Windows 安装说明重试。');
+  return false;
+}
 console.log('\n麦田 · 安装向导\n');
 console.log('一、检查环境');
 const [maj, min] = process.versions.node.split('.').map(Number);
 if (maj > 22 || (maj === 22 && min >= 5)) ok(`Node.js ${process.versions.node}`); else { bad(`Node.js ${process.versions.node}，需要 22.5 以上（用到内置 node:sqlite）`); tip(`卡住了看这里：${GROUP_URL}`); process.exit(1); }
-if (WIN) tip('Windows：开机自启还没适配，装完后双击安装目录里的 4-start.bat 启动麦田（窗口别关）');
-else if (process.platform !== 'darwin') tip('目前只在 macOS 和 Windows 上实测过；其他系统需要自己改开机自启和 NAS 挂载部分');
+if (!WIN && process.platform !== 'darwin') tip('目前只在 macOS 和 Windows 上实测过；其他系统需要自己改开机自启和 NAS 挂载部分');
 // Windows 上 Chrome 可能装在 Program Files、Program Files (x86) 或用户目录（只给自己装时）
 const chrome = (WIN
   ? [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].filter(Boolean).map(d => path.join(d, 'Google', 'Chrome', 'Application', 'chrome.exe'))
@@ -44,7 +53,10 @@ chrome ? ok('Google Chrome') : bad('没找到 Google Chrome，请先安装');
 let cf = false; try { execFileSync('which', ['cloudflared'], { stdio: 'pipe' }); cf = true; ok('cloudflared（可选，远程访问用）'); } catch { tip('没装 cloudflared：想在手机上远程看麦田，之后 brew install cloudflared'); }
 
 if (fs.existsSync(CFG) && !(await yes('\n已经有 config.json，要重新生成吗？（旧的会备份成 config.json.bak）', false))) {
-  console.log('\n保留现有配置。'); rl.close(); process.exit(0);
+  console.log('\n保留现有配置。');
+  if (await askWindowsAutostart()) installWindowsAutostart();
+  else if (WIN) tip('可按 README 的 Windows 安装说明单独启用登录自启。');
+  rl.close(); process.exit(0);
 }
 
 console.log('\n二、几个问题（不知道的直接回车，之后可以改 config.json）');
@@ -78,13 +90,17 @@ console.log('\n三、收尾');
 if (process.platform === 'darwin' && await yes('装成开机自启的守护进程？（推荐，之后自动采数据、发通知）')) {
   spawnSync(path.join(ROOT, 'scripts/install-launchd.sh'), cf && await yes('顺带装远程访问隧道（cloudflared）？', false) ? ['--tunnel'] : [], { stdio: 'inherit' });
 }
+const enableWindowsAutostart = await askWindowsAutostart();
 if (chrome && await yes('现在打开专用 Chrome：先从应用商店添加麦田发布助手，再登录各平台？（每个平台扫码或登录一次）')) {
   spawnSync(process.execPath, [path.join(ROOT, 'src/hub.mjs'), 'login'], { stdio: 'inherit' });
 }
+const windowsStart = enableWindowsAutostart && installWindowsAutostart()
+  ? '登录自启已启用，本次启动结果见上方'
+  : '双击安装目录里的 4-start.bat 启动麦田（窗口别关）';
 console.log(`
 完成。接下来：
   · 打开 http://localhost:${cfg.web.port}/?key=${cfg.web.key}
-  · 登录完各平台后跑一次体检，只查登录了的平台更快：node src/hub.mjs doctor --only bilibili,xhs${WIN ? '\n  · Windows：双击安装目录里的 4-start.bat 启动麦田（窗口别关），2-login.bat 重新打开专用 Chrome 登录' : ''}
+  · 登录完各平台后跑一次体检，只查登录了的平台更快：node src/hub.mjs doctor --only bilibili,xhs${WIN ? `\n  · Windows：${windowsStart}，双击 2-login.bat 可重新打开专用 Chrome 登录` : ''}
   · 只看数据（L1）：已经发过的期用 node src/hub.mjs adopt <工程目录> 登记
   · 分发（L2）：按 skills/maitian-publish 准备发布工程，node src/hub.mjs plan <工程目录>，到点前 node src/hub.mjs run <工程目录>
   · 想先看看效果：node src/demo.mjs（假数据，不碰你的配置）

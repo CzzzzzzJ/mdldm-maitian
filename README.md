@@ -75,13 +75,29 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/m
 
 下载麦田和发布助手到 `~/maitian/`、接上发布 skill、打开安装向导；向导问完几个问题，生成配置、装好开机自启、打开各平台登录页。需要 macOS、Node.js ≥ 22.5、Google Chrome。
 
-Windows（社区贡献，感谢 [ajin558](https://github.com/ajin558)；开机自启暂未适配）：
+Windows（社区贡献，感谢 [ajin558](https://github.com/ajin558)）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install-windows.ps1 | iex"
 ```
 
-同样下载到 `%USERPROFILE%\maitian\`、接上发布 skill、打开安装向导，安装目录里另有 4 个双击启动器（演示 / 登录 / 体检 / 启动）。需要 Windows 10/11、Node.js ≥ 22.5、Google Chrome；缺 Git / Node 时脚本会用 winget 自动补装。开机自启暂未适配（向导里的 launchd 步骤会自动跳过），可用任务计划程序指向安装目录的 `4-start.bat` 代替。
+同样下载到 `%USERPROFILE%\maitian\`、接上发布 skill、打开安装向导，安装目录里另有 4 个双击启动器（演示 / 登录 / 体检 / 启动）。需要 Windows 10/11、Node.js ≥ 22.5、Google Chrome。缺 Git 或 Node 时，脚本会用 winget 补装。
+
+在安装向导选「启用 Windows 登录自启，并现在启动麦田」后，麦田会在本次安装结束时启动，以后每次用当前 Windows 账号登录时也会启动。如果大屏端口已有进程监听，安装会跳过本次启动。可以在任务计划程序里找到 `MaitianDaemon-` 开头的任务，查看状态或手动运行。计划任务未运行时，也可以双击安装目录里的 `4-start.bat` 手动启动。
+
+已有 `config.json` 的用户可以保留原配置，在 `mdldm-maitian` 仓库目录打开 PowerShell，运行下方对应命令。
+
+```powershell
+# 启用登录自启，并立即启动
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-autostart.ps1 -StartNow
+
+# 关闭登录自启，也会停止正在运行的计划任务
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-autostart.ps1 -Uninstall
+```
+
+计划任务在守护进程异常退出后每隔 1 分钟尝试重启，最多 3 次。运行输出追加到仓库内的 `data/daemon.log`。安装后大屏迟迟打不开时，可查看这份日志和任务计划程序里的任务状态。
+
+计划任务使用注册时的 `node.exe` 路径。用 nvm 等工具更换 Node.js 后，如果可执行文件路径变了，请在能找到新 `node.exe` 的 PowerShell 里重跑上面的启用命令，更新现有任务。
 
 <p align="center"><img src="https://github.com/CzzzzzzJ/mdldm-maitian/releases/download/media/maitian-install.gif" width="720" alt="一行安装演示" /></p>
 
