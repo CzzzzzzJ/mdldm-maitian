@@ -40,6 +40,26 @@ function installWindowsAutostart() {
   tip('可继续手动启动麦田，或按 README 的 Windows 安装说明重试。');
   return false;
 }
+// 用系统默认浏览器打开大屏。macOS 用 open；Windows 用 cmd /c start "" <url>。
+// start 把第一个引号参数当成窗口标题，所以先给一个空标题。
+// cmd 会把 & | < > ^ % 拆成别的命令，用 ^ 转义。其他系统不打开。
+function boardLaunch(url, platform = process.platform) {
+  if (platform === 'darwin') return { file: 'open', args: [url], opts: { stdio: 'ignore' } };
+  if (platform !== 'win32') return null;
+  const escaped = url.replace(/[&|^<>%]/g, (ch) => `^${ch}`);
+  return {
+    file: 'cmd.exe',
+    args: ['/c', 'start', '""', escaped],
+    opts: { stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true },
+  };
+}
+// 打开失败不打断向导；打不开时用户仍能从终端里复制地址
+function openBoard(url) {
+  const spec = boardLaunch(url);
+  if (!spec) return false;
+  const r = spawnSync(spec.file, spec.args, spec.opts);
+  return !r.error && r.status === 0;
+}
 console.log('\n麦田 · 安装向导\n');
 console.log('一、检查环境');
 const [maj, min] = process.versions.node.split('.').map(Number);
@@ -97,9 +117,11 @@ if (chrome && await yes('现在打开专用 Chrome：先从应用商店添加麦
 const windowsStart = enableWindowsAutostart && installWindowsAutostart()
   ? '登录自启已启用，本次启动结果见上方'
   : '双击安装目录里的 4-start.bat 启动麦田（窗口别关）';
+const boardUrl = `http://localhost:${cfg.web.port}/?key=${cfg.web.key}`;
+if (openBoard(boardUrl)) console.log('\n已用默认浏览器打开大屏。');
 console.log(`
 完成。接下来：
-  · 打开 http://localhost:${cfg.web.port}/?key=${cfg.web.key}
+  · 打开 ${boardUrl}
   · 登录完各平台后跑一次体检，只查登录了的平台更快：node src/hub.mjs doctor --only bilibili,xhs${WIN ? `\n  · Windows：${windowsStart}，双击 2-login.bat 可重新打开专用 Chrome 登录` : ''}
   · 只看数据（L1）：已经发过的期用 node src/hub.mjs adopt <工程目录> 登记
   · 分发（L2）：按 skills/maitian-publish 准备发布工程，node src/hub.mjs plan <工程目录>，到点前 node src/hub.mjs run <工程目录>
