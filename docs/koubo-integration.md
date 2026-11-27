@@ -291,3 +291,58 @@ node src/koubo-bridge.mjs --selftest
 * **六个页签逐个点击**（iframe 内 hash 路由）：流量 5 KPI/2 表、日历 2 面板/1 表、转化 4 KPI/漏斗、档案 5 子标签（分发回执 10 行）、系统 5 KPI/2 表 —— 全部出真实内容，无 404。
 * 端点：`/api/koubo/board` → `kb-board-v1`，`distribution` 39 期 / 10 待发布；`/board/index.html` 200（85061 B）；`probe rc=0`。
 * 不回归：L1 **47/47**、L2 **31/31**（7 场景全 done）；三页面 8 个内联脚本块语法全通过。
+
+---
+
+## 九、轮13：彻底重构 —— 100% 复用麦田原文件，只换数据契约（2026-11-27）
+
+### 9.1 问题诊断（用户指出"使用功能架构交互全乱了"）
+上一轮我把麦田**两个页面合并成一个自造页面**，并自造了模式切换与页签内容。逐行读懂麦田源码后发现真实架构是：
+
+| | 麦田原文件 | 角色 | 数据 | 操作 |
+|---|---|---|---|---|
+| 大屏 | `src/web/board.html`（462 行） | **只读电视墙**，本身不做页面切换 | `GET /api/overview` | 顶栏 nav 是**跳转到另一个页面** `/p#/xxx` |
+| 操作台 | `src/web/pages.html`（549 行） | **hash 路由单页应用** | `/api/overview`、`/api/episode`、`/api/account-traffic` | `abtn` 按钮 → `POST /api/action` **真实执行** + 轮询；`#/ep/<id>` 单期详情 |
+
+上一轮的错在于：①把大屏与操作台合成一页；②占用麦田 nav 槽位放自造的「复刻/融合/优化」切换；③自造六个页签的内容（与麦田语义对不上，如"流量"本该是每期×平台明细矩阵）；④丢掉了 `abtn` 动作执行与 `#/ep/<id>` 单期详情，导致"很多场景无法精准指向执行数据"。
+
+### 9.2 本轮方案：UI 用麦田原文件，只做数据契约适配
+**不再自造任何 UI。** 麦田的 `board.html` / `pages.html` / `mt.css` / `mt.js` **原文件直接使用**（MIT，保留 `LICENSE.maitian`），只做三类最小改写：
+
+1. **路径适配**（不碰结构与交互）
+   * 静态资源 `/static/mt.css|mts.js` → `/board/static/...`（server 新增 `/board/static/*` 路由）
+   * API `/api/overview` → `/api/koubo/maitian/overview`；`/api/episode` `/api/action` `/api/account-traffic` `/api/integrations` `/api/bilibili-accounts` `/api/platform-toggle` 同理映射
+   * 封面 `/cover?id=` → `/api/koubo/maitian/cover?id=`（口播无封面图 → 用真实标题生成 SVG 占位）
+   * 导航改为**相对路径**（`pages.html#/traffic`），使其在智漫6 的 iframe 内切换而不跳出
+2. **口径覆盖**（结构不动，只换文案取值处）：契约层返回 `labels`，前端从 `O.labels` 取值
+   `views:全平台播放→分发条数`、`inter:互动→已发布`、`rate:互动率→发布率`、`fans:粉丝→采集来源`、
+   `lightBrowser:专用浏览器→采集通道 匿名直连`、`lightLogin:平台登录→采集源 正常`、`tag:内容与粉丝监控→内容与分发监控 · 口播工作台`
+3. **新增服务端路由**：`/board/board.html`（大屏）、`/board/pages.html`（操作台）、`/board/static/*`、`/api/koubo/maitian/*`（GET+POST）
+
+### 9.3 数据契约映射（口播 ⇄ 麦田，字段名完全沿用麦田）
+| 麦田 | 口播 | 说明 |
+|---|---|---|
+| `episodes[]`（发布工程） | `job(scene=cut/gen, artifact=mp4)` | 一次成片 = 一期；含 covers/nick/schedule/publishAt/createdAt |
+| `episodes[].tasks[]`（某期某平台） | 发布台账 `publish/*.json` | dry-run→`awaiting_user`「待你点发布」；真发→`published`；无→`planned` |
+| `metrics[]`（日×期×平台播放） | 每日每平台分发条数 | `extra.proxy=1` 标注口径=分发条数，非平台播放量 |
+| `samples[]`（采样点） | 每次成片/分发动作 | 供麦田画发布后累计曲线 |
+| `followers[]` | **空**（口播无粉丝） | 麦田自带空态「还没有粉丝记录」，不伪造 |
+| `site{days,channels,campaigns}` | **空**，`siteOn=false` | 麦田原生引导「还没接你自己的站点」 |
+| `health.platforms[]` | 11 个采集源 + 7 项 need_setup | 可达→`state=ok`；需登录→`disabled=true`（不计掉线） |
+| `feed[]` | 最近任务 | 场景/状态/产物 |
+| `POST /api/action` | 真实动作 | `metrics`→**真跑 radar 采集**（实测 20 条/11 源）；`followers`/`doctor`/`login`→诚实说明口播不依赖登录态；`sync`→**真跑 publish dry-run**；`mark`→诚实说明未接真发通道 |
+
+### 9.4 验收（真浏览器实跑，全链路）
+* 从智漫6 左栏「📊 数据大屏」进入 → 麦田原版大屏渲染真实数据：hero=真实成片标题、37 期页签、平台格子「抖音 待你点发布」、三数「分发条数 10 / 已发布 0 / 发布率 0.0%」、9 张平台卡、4 盏灯「守护进程 运行中 / NAS 已挂载 / 采集通道 匿名直连 / 采集源 正常」。
+* 点顶栏「档案」→ **iframe 内**切到操作台（37 张封面墙、`h1=档案`）。
+* 点封面 → `#/ep/<id>` 单期详情：`第 1 期`、状态芯片「! 待你点发布」、`0/1` 已发布、三个动作按钮（取链接、对状态 / 采这一期的流量 / 我已发布）、平台表、文案快照、过程记录（真实任务日志 `11/27 11:21 queued 任务已入队…`）。
+* 五个页签逐个真实出内容：流量 4 KPI/3 表、日历 28 天格、转化诚实空态、档案 37 张、系统 4 KPI/46 按钮。
+* 动作按钮实测：`采流量` → 真跑 radar 采集返回「真实采集 20 条（11 源可达）」；`采粉丝` → 诚实说明「口播工作台走匿名公开源（11 源可达），不需要平台登录态，也没有粉丝数据」。
+* 端点：`/api/koubo/maitian/overview` → 35 期、真实 metrics/samples、`health.platforms` 17 项；`/api/koubo/maitian/episode?id=` → 单期详情（含 7 条过程记录 + 产物路径）；`/board/board.html` 200（53503 B）、`/board/pages.html` 200（58580 B）、`/board/static/mt.css|mts.js` 200。
+* 不回归：L1 **47/47**、L2 **32/32**（新增 `cap/koubo_maitian` 检查通过，因补了 `status()`）；8 个内联脚本块语法全通过。
+
+### 9.5 本轮修掉的 bug
+1. `koubo_maitian.py` 缺 `status()` → L2 `cap/koubo_maitian` 返回 None 判 FAIL（与历史同类坑：模块必须实现 status()）→ 补齐后 32/32。
+2. 单期详情 `episode=0` → 显示「第 0 期」→ 改为按真实排序取期号。
+3. 时间戳无时区 → 麦田 `when()` 用 `new Date(iso)` 解析，按 UTC 偏 8 小时（显示 `1/22 02:49`）→ `_iso()` 改为带时区 ISO（`+08:00`），日志/feed 同步。
+4. iframe 内导航用绝对路径 → 点页签会跳出 iframe 到顶层 → 改为相对路径 `pages.html#/xxx`。
