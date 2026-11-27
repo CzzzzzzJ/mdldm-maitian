@@ -28,6 +28,19 @@ test('网络异常', async () => {
   assert.match(r.error, /offline/);
 });
 
+test('打开麦田按钮不带口令', async () => {
+  const file = path.join(dir, 'tunnel.json');
+  fs.writeFileSync(file, JSON.stringify({ url: 'https://mt.example/?key=supersecret', base: 'https://mt.example/?key=supersecret' }));
+  process.env.MAITIAN_TUNNEL = file;
+  try {
+    const { toCard } = await import(`../src/feishu.mjs?card=${Date.now()}`);
+    const text = JSON.stringify(toCard('✅ 完成\n一切正常'));
+    assert.equal(text.includes('supersecret'), false);
+    assert.equal(text.includes('key='), false);
+    assert.match(text, /https:\/\/mt\.example/);
+  } finally { delete process.env.MAITIAN_TUNNEL; }
+});
+
 test('空 webhook 直接报错', async () => {
   const { testFeishu } = await import(`../src/feishu.mjs?t=${Date.now()}`);
   const r = await testFeishu('');

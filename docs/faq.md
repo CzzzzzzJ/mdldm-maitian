@@ -36,6 +36,14 @@ node src/hub.mjs doctor --only douyin,channels
 
 专用 Chrome 里装了别的插件。篡改猴（Tampermonkey）、抓包 / 拦截请求这类插件会被抖音判成高危，整个页面暂停。专用 Chrome 里只留「麦田发布助手」，其他插件到 `chrome://extensions` 里删掉或停用，再刷新抖音后台。日常插件装在你平时用的 Chrome 里就行，两边互不影响。
 
+## 同一 Wi-Fi 的手机打不开大屏？
+
+网页默认只监听本机（`127.0.0.1`）。要给局域网用，把 `config.json` 的 `web.host` 改成 `0.0.0.0` 后重启守护进程。人不在家时走隧道，并打开 Cloudflare Access 或飞书验证码；飞书里的链接不再带口令。见 README「远程访问」。
+
+## 发布前查重失败会怎样？
+
+X、YouTube、Instagram、Threads、知识站的线上查重如果出错，这一家会停在「待你点发布」，说明里写着原因，**不会**当成没发过继续上传。看清楚线上没有重复之后，再 `node src/hub.mjs run <工程目录> --force`。国内四家没有这道线上查重，仍然是填完等你自己点发布。
+
 ## 还有问题？
 
 到 [Discussions](https://github.com/CzzzzzzJ/mdldm-maitian/discussions) 问。

@@ -114,7 +114,7 @@ node src/init.mjs                       # 安装向导：检查环境、生成 c
 node src/hub.mjs doctor                 # 登录完检查各平台登录态和上传页（不上传、不填写）
 ```
 
-打开向导最后给出的地址（`http://localhost:8787/?key=<web.key>`），之后浏览器会记住口令。手动安装也可以：`cp config.example.json config.json` 填好后跑 `scripts/install-launchd.sh`。
+打开向导最后给出的地址（`http://127.0.0.1:8787/?key=<web.key>`）。口令只在这次向导里出现，守护进程日志、隧道文件和飞书通知都不带。网页默认只监听本机，浏览器会记住口令。手动安装也可以：`cp config.example.json config.json` 填好后跑 `scripts/install-launchd.sh`。
 
 ### 三级上手
 
@@ -129,7 +129,7 @@ node src/hub.mjs doctor                 # 登录完检查各平台登录态和�
 - **播种（发布）**：读 NAS 上的一期发布工程（成片、封面、各平台文案、定时），按批次在专用 Chrome 里填好各平台上传页。
   - X、YouTube、Instagram、自有站点：回读文案和定时一致后自动提交，只点一次。
   - B站、抖音、小红书、视频号：**填好就停**，等你自己点「发布 / 定时发布」，守护进程巡检时提醒，同一期的提醒至少间隔 20 分钟。启用了快手时同样只填写、由你点发布。
-  - 防重：库里已经到位的平台不再跑；X 定时列表、YouTube Studio、Instagram 主页、站点后台已有同名的不再传。
+  - 防重：库里已经到位的平台不再跑；同一期同时只有一个进程能上传（另一个 `hub run` / `hub submit` 会停下来）。X 定时列表、YouTube Studio、Instagram、Threads、站点后台已有同名的不再传。这些查重如果失败（网络、页面没读到、平台异常），该平台停在「待你点发布」并写明原因，不会当成没有重复继续上传；确认线上没有重复后，用 `hub run <目录> --force` 重跑。
 - **长势（流量和粉丝）**：每天上午采一次各期在各平台的播放和互动、各平台粉丝数；新一期头三天每 6 小时采一次。「账号作品」能单独查看 B站、抖音、小红书现有作品，不用登记发布工程。点「采集账号流量」或运行 `node src/hub.mjs metrics-accounts`；直连模式会自动启动专用 Chrome，首次需先登录。可在 `config.json` 中设置 `"accountTrafficAuto": true`，随每天的流量日报采集。失败时保留上次成功数据。
   - B站副号可在 `bilibiliAccounts` 配置（例如 `[{ "id": "second", "name": "副号" }]`）。副号需要 `direct` 模式并使用独立的调试端口和 Chrome 登录目录（默认按 ID 分配，亦可显式设置 `chromePort`、`chromeProfile`）。可填 `uid` 防止登错号；首次成功采集后也会校验历史归属。副号不参与发布。
 - **收成（转化，可选）**：接上自有站点后，看注册、会员、订单、收入从哪个渠道、哪一期来。
@@ -214,7 +214,8 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 | `bilibiliAccounts` | 可选的 B 站采集账号配置；这项配置不改变发布账号或发布流程 |
 | `site` | 自有站点，可选，见下 |
 | `board` | 飞书多维表格看板，可选 |
-| `web.key` | 网页口令，所有页面和接口没有口令一律 401 |
+| `web.key` | 网页口令，所有页面和接口没有口令一律 401。不写进守护进程日志、`data/tunnel.json` 和飞书 |
+| `web.host` | 网页监听地址，默认 `127.0.0.1`（只本机）。改成 `0.0.0.0` 才对局域网开放。远程访问走隧道，并打开下面的 Cloudflare Access 或飞书验证码 |
 
 多账号采集配置示例（可选）：
 
@@ -274,6 +275,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 - **固定域名（推荐）**：域名交给 Cloudflare 后，跑 `cloudflared tunnel login`、`cloudflared tunnel create maitian`、`cloudflared tunnel route dns maitian maitian.你的域名`，在 `config.json` 里加 `"tunnel": { "name": "maitian", "hostname": "maitian.你的域名" }`。地址永远不变，建议再在 Cloudflare Zero Trust 里给它加一层邮箱验证码登录（Access → Self-hosted 应用），然后在 `config.json` 的 `web.access` 填团队域名和应用的 AUD Tag：麦田会验证 Access 签发的登录凭证，手机上输邮箱收验证码就能进，不用再带 `?key=`。
 - **飞书验证码登录（推荐，零配置）**：`config.json` 的 `web` 里加 `"login": "feishu"`。远程打开麦田会先到登录页，点「发送验证码」，6 位码推到飞书群，输入后这台设备记住 30 天；验证码 5 分钟有效、只能用一次、错 5 次作废，60 秒内只能发一次。`?key=` 口令仍可用作备用。飞书 webhook 和这个开关也能在网页「系统 → 集成」里编辑、点「测试发送」，保存即生效。
 - **快速隧道（默认）**：不配 `tunnel` 时用 `https://xxx.trycloudflare.com`，不用账号，但每次重启地址都会变。
+- 飞书里的「打开麦田」和 `data/tunnel.json` 只保存隧道地址，**不带 `?key=`**。没开 Access 或飞书验证码时，这条链接打开后仍要口令，口令只在本机 `config.json`。
 
 </details>
 

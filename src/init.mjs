@@ -104,7 +104,7 @@ cfg.chromeProfile = path.join(ROOT, 'chrome-profile');
 
 if (fs.existsSync(CFG)) fs.copyFileSync(CFG, CFG + '.bak');
 fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2) + '\n');
-ok(`已写入 config.json（网页口令：${cfg.web.key}）`);
+ok(`已写入 config.json（网页口令：${cfg.web.key}；只在这次向导里显示，之后看 config.json 的 web.key）`);
 
 console.log('\n三、收尾');
 if (process.platform === 'darwin' && await yes('装成开机自启的守护进程？（推荐，之后自动采数据、发通知）')) {
@@ -117,11 +117,12 @@ if (chrome && await yes('现在打开专用 Chrome：先从应用商店添加麦
 const windowsStart = enableWindowsAutostart && installWindowsAutostart()
   ? '登录自启已启用，本次启动结果见上方'
   : '双击安装目录里的 4-start.bat 启动麦田（窗口别关）';
-const boardUrl = `http://localhost:${cfg.web.port}/?key=${cfg.web.key}`;
+const boardUrl = `http://127.0.0.1:${cfg.web.port}/?key=${cfg.web.key}`;
 if (openBoard(boardUrl)) console.log('\n已用默认浏览器打开大屏。');
 console.log(`
 完成。接下来：
   · 打开 ${boardUrl}
+    口令只出现在本机这次向导里。守护进程日志、隧道文件和飞书通知都不带口令。网页默认只监听本机；要给局域网用，把 web.host 改成 0.0.0.0。远程请走隧道，并打开 Cloudflare Access 或飞书验证码。
   · 登录完各平台后跑一次体检，只查登录了的平台更快：node src/hub.mjs doctor --only bilibili,xhs${WIN ? `\n  · Windows：${windowsStart}，双击 2-login.bat 可重新打开专用 Chrome 登录` : ''}
   · 只看数据（L1）：已经发过的期用 node src/hub.mjs adopt <工程目录> 登记
   · 分发（L2）：按 skills/maitian-publish 准备发布工程，node src/hub.mjs plan <工程目录>，到点前 node src/hub.mjs run <工程目录>

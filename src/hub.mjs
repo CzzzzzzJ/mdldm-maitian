@@ -26,6 +26,7 @@ import { learnOn, learnUrl, GROUP_URL } from './learn.mjs';
 import { validateProject } from './validate.mjs';
 import { STORE_URL, pluginInfo } from './plugin.mjs';
 import { xExisting, xSubmit, ytRows, ytSubmit, zszCourses, douyinTopics, igExisting, igSubmit, threadsExisting, threadsSubmit } from './checks.mjs';
+import { holdPublishLock } from './publish-lock.mjs';
 // 出错时附一次交流群和教程入口；每天最多一次，不刷屏（config.learnLinks = false 关掉）
 function helpTip() {
   if (!learnOn(config)) return '';
@@ -127,6 +128,25 @@ const SUBMIT_PAGES = {
   x: [/(x|twitter)\.com/, `!!document.querySelector('[data-testid=tweetTextarea_0]')`],
 };
 const refuse = (m) => Object.assign(new Error(m), { quiet: true });   // 拒绝提交是正常保护，不发飞书
+// 查重抛错，或 YouTube 列表根本没读到：停在待你点发布，不当成「没有重复」继续上传。
+async function holdUnchecked(ep, id, why, verb = '没有上传') {
+  const retry = verb === '没有上传' ? '用 hub run --force 重跑' : '再跑一次 hub submit';
+  const detail = `查重失败，${verb}：${String(why || '没有结果').replace(/\s+/g, ' ').slice(0, 180)}。确认线上没有重复后，${retry}`;
+  setTask(ep.id, id, 'awaiting_user', detail);
+  console.log(`${NAMES[id] || id} ${detail}`);
+  await notify(`⚠️ ${ep.name}\n${NAMES[id] || id} ${detail}`);
+}
+async function lookupExisting(ep, id, fn, { verb = '没有上传', fail } = {}) {
+  try {
+    const value = await fn();
+    const why = fail && fail(value);
+    if (why) { await holdUnchecked(ep, id, why, verb); return { ok: false }; }
+    return { ok: true, value };
+  } catch (e) {
+    await holdUnchecked(ep, id, (e && e.message) || e, verb);
+    return { ok: false };
+  }
+}
 async function submitOne() {
   const ep = getEpisode(args[1]), id = args[2];
   if (!ep) throw refuse('没有这一期，先 hub status 看 id');
@@ -136,10 +156,16 @@ async function submitOne() {
   const t = getTask(ep.id, id);
   if (t && ['scheduled', 'published'].includes(t.state)) throw refuse(`${NAMES[id]} 已经是「${STATE_CN[t.state]}」，不再提交`);
   await drv.ensure();
-  if (id === 'instagram' && await igExisting(p.caption, pj.schedule).catch(() => null)) throw refuse('Instagram 上已经有这一期（定时内容或主页），不再提交');
-  if (id === 'x' && await xExisting(p.text).catch(() => null)) throw refuse('X 上已经有这条，不再提交');
-  if (id === 'threads' && await threadsExisting(p.text).catch(() => null)) throw refuse('Threads 主页上已经有这条，不再提交');
-  if (id === 'youtube') { const rows = await ytRows(p.title).catch(() => null); if (rows && (rows.length > 1 || rows.some(r => !/草稿|待处理|上传|处理中/.test(r)))) throw refuse(`YouTube Studio 里已有：${rows.join('；')}，不再提交`); }
+  const held = holdPublishLock(ep.id);
+  try {
+  if (id === 'instagram') { const r = await lookupExisting(ep, id, () => igExisting(p.caption, pj.schedule), { verb: '没有提交' }); if (!r.ok) throw refuse(`${NAMES[id]} 查重失败，没有提交`); if (r.value) throw refuse('Instagram 上已经有这一期（定时内容或主页），不再提交'); }
+  if (id === 'x') { const r = await lookupExisting(ep, id, () => xExisting(p.text), { verb: '没有提交' }); if (!r.ok) throw refuse(`${NAMES[id]} 查重失败，没有提交`); if (r.value) throw refuse('X 上已经有这条，不再提交'); }
+  if (id === 'threads') { const r = await lookupExisting(ep, id, () => threadsExisting(p.text), { verb: '没有提交' }); if (!r.ok) throw refuse(`${NAMES[id]} 查重失败，没有提交`); if (r.value) throw refuse('Threads 主页上已经有这条，不再提交'); }
+  if (id === 'youtube') {
+    const r = await lookupExisting(ep, id, () => ytRows(p.title), { verb: '没有提交', fail: (rows) => rows == null ? 'YouTube Studio 列表没读到' : '' });
+    if (!r.ok) throw refuse(`${NAMES[id]} 查重失败，没有提交`);
+    if (r.value.length > 1 || r.value.some(row => !/草稿|待处理|上传|处理中/.test(row))) throw refuse(`YouTube Studio 里已有：${r.value.join('；')}，不再提交`);
+  }
   const [re, ready] = SUBMIT_PAGES[id], cands = [];
   for (const tab of await drv.adoptTabs(re)) if (await drv.evaluate(tab, ready).catch(() => false)) cands.push(tab);
   if (cands.length !== 1) throw refuse(`专用 Chrome 里填好的 ${NAMES[id]} 发帖页有 ${cands.length} 个，要恰好 1 个才提交`);
@@ -149,6 +175,7 @@ async function submitOne() {
   console.log(`${NAMES[id]}：${STATE_CN[now.state] || now.state}${now.detail ? `（${now.detail}）` : ''}`);
   if (['scheduled', 'published'].includes(now.state)) await notify(`✅ ${ep.name}\n${NAMES[id]}（hub submit）：${STATE_CN[now.state]}${now.detail ? `，${now.detail}` : ''}`);
   await board({ site: false }).catch(() => {});
+  } finally { held.release(); }
 }
 
 async function run() {
@@ -185,17 +212,22 @@ async function run() {
   await drv.ensure();
   if (await drv.busy()) throw new Error('插件里还有一轮在跑，等它结束或先停掉');
 
-  // 防重 2：平台上已经有了的不再跑
-  if (todo.includes('x')) { const e = await xExisting(pj.platforms.x.text).catch(() => null); if (e) { setTask(ep.id, 'x', e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'x'); console.log('X 上已经有这条，跳过'); } }
-  if (todo.includes('youtube')) { const rows = await ytRows(pj.platforms.youtube.title).catch(() => null); if (rows && rows.length) {
+  // 防重 2：同一期同一时间只有一个进程能上传（daemon、手工 hub run、网页拉起的 hub run）
+  let lockLost = null;
+  const held = holdPublishLock(ep.id, { onLost(e) { lockLost = e; } });
+  try {
+  // 防重 3：平台上已经有了的不再跑。查重失败则停住，不当成没有重复。
+  if (todo.includes('x')) { const r = await lookupExisting(ep, 'x', () => xExisting(pj.platforms.x.text)); if (!r.ok) todo = todo.filter(i => i !== 'x'); else if (r.value) { setTask(ep.id, 'x', r.value.state, r.value.detail, { url: r.value.url }); todo = todo.filter(i => i !== 'x'); console.log('X 上已经有这条，跳过'); } }
+  if (todo.includes('youtube')) { const r = await lookupExisting(ep, 'youtube', () => ytRows(pj.platforms.youtube.title), { fail: (rows) => rows == null ? 'YouTube Studio 列表没读到' : '' }); if (!r.ok) todo = todo.filter(i => i !== 'youtube'); else if (r.value.length) {
+    const rows = r.value;
     todo = todo.filter(i => i !== 'youtube');
     const url = (rows[0].match(/https:\S+/) || [])[0];
     if (rows.length === 1 && /已安排|定时|首播|公开/.test(rows[0]) && !/草稿|待处理/.test(rows[0])) setTask(ep.id, 'youtube', /已安排|定时|首播/.test(rows[0]) ? 'scheduled' : 'published', rows[0].replace(/ https:\S+/, ''), { url });
     else { setTask(ep.id, 'youtube', 'awaiting_user', `Studio 里已有 ${rows.length} 条同标题视频：${rows.join('；')}`); await notify(`⚠️ ${ep.name}\nYouTube Studio 里已有同标题视频（${rows.join('；')}），没有再上传，请先处理`); }
   } }
-  if (todo.includes('instagram')) { const e = await igExisting(pj.platforms.instagram.caption, pj.schedule).catch(() => null); if (e) { setTask(ep.id, 'instagram', e.count > 1 ? 'awaiting_user' : e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'instagram'); console.log('Instagram 上已经有这一期，跳过'); if (e.count > 1) await notify(`⚠️ ${ep.name}\nInstagram ${e.detail}，请去定时内容里删掉多余的`); } }
-  if (todo.includes('threads')) { const e = await threadsExisting(pj.platforms.threads.text).catch(() => null); if (e) { setTask(ep.id, 'threads', e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'threads'); console.log('Threads 上已经有这条，跳过'); } }
-  if (todo.includes('zsz')) { const cs = await zszCourses(pj.platforms.zsz.title).catch(() => []); if (cs.length) { setTask(ep.id, 'zsz', cs[0].vis === 'published' ? 'published' : 'scheduled', '后台已有同名课程', { url: SITE.courseUrl(cs[0]) }); todo = todo.filter(i => i !== 'zsz'); } }
+  if (todo.includes('instagram')) { const r = await lookupExisting(ep, 'instagram', () => igExisting(pj.platforms.instagram.caption, pj.schedule)); if (!r.ok) todo = todo.filter(i => i !== 'instagram'); else if (r.value) { const e = r.value; setTask(ep.id, 'instagram', e.count > 1 ? 'awaiting_user' : e.state, e.detail, { url: e.url }); todo = todo.filter(i => i !== 'instagram'); console.log('Instagram 上已经有这一期，跳过'); if (e.count > 1) await notify(`⚠️ ${ep.name}\nInstagram ${e.detail}，请去定时内容里删掉多余的`); } }
+  if (todo.includes('threads')) { const r = await lookupExisting(ep, 'threads', () => threadsExisting(pj.platforms.threads.text)); if (!r.ok) todo = todo.filter(i => i !== 'threads'); else if (r.value) { setTask(ep.id, 'threads', r.value.state, r.value.detail, { url: r.value.url }); todo = todo.filter(i => i !== 'threads'); console.log('Threads 上已经有这条，跳过'); } }
+  if (todo.includes('zsz')) { const r = await lookupExisting(ep, 'zsz', () => zszCourses(pj.platforms.zsz.title), { fail: (cs) => Array.isArray(cs) ? '' : '知识站课程列表没读到' }); if (!r.ok) todo = todo.filter(i => i !== 'zsz'); else if (r.value.length) { const cs = r.value; setTask(ep.id, 'zsz', cs[0].vis === 'published' ? 'published' : 'scheduled', '后台已有同名课程', { url: SITE.courseUrl(cs[0]) }); todo = todo.filter(i => i !== 'zsz'); } }
   // 知识站没有定时：建课转码完就直接上线、发 VIP 群通知。定时发布的期推迟到定时前 ZSZ_LEAD 分钟由守护进程建课
   //（2026-11-12 第 37 期提前将近一天上线）
   if (todo.includes('zsz') && !args.includes('--now') && pj.schedule && Date.parse(pj.schedule) - Date.now() > (ZSZ_LEAD + 10) * 60000) {
@@ -220,6 +252,8 @@ async function run() {
   for (const b of BATCHES()) {
     const batch = b.filter(i => todo.includes(i));
     if (!batch.length) continue;
+    if (lockLost) throw lockLost;
+    held.touch();
     let res;
     try { res = await runBatch(ep, pj, batch); }
     catch (e) { for (const id of batch) setTask(ep.id, id, 'failed', e.message); await notify(`❌ ${ep.name}\n${batch.map(i => NAMES[i]).join('、')} 这一批没跑起来：${e.message}${helpTip()}`); continue; }
@@ -236,6 +270,8 @@ async function run() {
     const lr = await drv.checkLogin(retry).catch(() => ({}));
     const ok = retry.filter(i => lr[i] && lr[i].ok);
     if (!ok.length) continue;
+    if (lockLost) throw lockLost;
+    held.touch();
     retry = retry.filter(i => !ok.includes(i));
     let res; try { res = await runBatch(ep, pj, ok); } catch (e) { for (const id of ok) setTask(ep.id, id, 'failed', e.message); continue; }
     await Promise.all(ok.filter(id => res[id]).map(id => after(ep, pj, id, res[id]).then(async () => {
@@ -246,6 +282,7 @@ async function run() {
   if (retry.length) await notify(`⚠️ ${ep.name}\n${retry.map(i => NAMES[i]).join('、')} 20 分钟内还没登录，没补跑；登录后运行 hub run <目录> --only ${retry.join(',')}`);
   await notify(`📋 ${ep.name} 本轮结束\n${table(ep.id)}`);
   await board({ site: false });
+  } finally { held.release(); }
 }
 
 // 取链接、更新状态；写 NAS 的 发布记录.json，回填发布素材 md 头部的「已发布」行
@@ -508,7 +545,7 @@ async function daemon() {
       if (waiting.length && every(`remind:${ep.id}`, 20 * MIN)) {
         const changed = await sync(ep, waiting.map(t => t.platform), true).catch(() => false);
         const still = getTasks(ep.id).filter(t => canPublish(t.platform) && t.state === 'awaiting_user');
-        if (still.length && !changed) await notify(`⏰ ${ep.name}\n还在等你点发布：${still.map(t => NAMES[t.platform]).join('、')}${sched ? `\n定时时间 ${ep.schedule.replace('T', ' ').slice(0, 16)}` : ''}`);
+        if (still.length && !changed) await notify(`⏰ ${ep.name}\n还在等你点发布：${still.map(t => `${NAMES[t.platform]}${t.detail && t.detail.startsWith('查重失败') ? `（${t.detail.slice(0, 80)}）` : ''}`).join('、')}${sched ? `\n定时时间 ${ep.schedule.replace('T', ' ').slice(0, 16)}` : ''}`);
       }
       if (unsettled.length && linkCheckDue(sched, Date.parse(ep.created_at), Number(getMeta(`sync:${ep.id}`)), Date.now()) && every(`sync:${ep.id}`, 30 * MIN)) {
         await sync(ep, unsettled.map(t => t.platform), true).catch((e) => console.error('sync 出错：' + e.message));

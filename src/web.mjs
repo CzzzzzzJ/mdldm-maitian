@@ -399,10 +399,39 @@ async function handle(req, res) {
   }
   send(res, 404, { error: 'not found' });
 }
+// 默认只绑本机回环。web.host 写成 0.0.0.0（或某一块网卡）才对局域网开放；远程走隧道。
+export function webListenPlan(web = {}) {
+  const host = typeof web?.host === 'string' ? web.host.trim() : '';
+  const loopback = !host || host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  return loopback ? { host: '127.0.0.1', loopback6: true, open: false } : { host, loopback6: false, open: true };
+}
 export function startWeb() {
-  const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: e.message }); } catch {} }); });
-  initLogin(ROOT);
-  srv.listen(W.port, '0.0.0.0', () => console.log(`麦田网页：http://localhost:${W.port}/?key=${W.key}`));
+  const handler = (req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: e.message }); } catch {} }); };
+  const peers = [];
+  const srv = http.createServer(handler);
+  peers.push(srv);
   srv.on('error', (e) => console.error('麦田网页没起来：' + e.message));
+  const origClose = srv.close.bind(srv);
+  srv.close = function closeWeb(cb) {
+    const others = peers.filter((s) => s !== srv);
+    const finish = () => origClose(cb);
+    if (!others.length) return finish();
+    let pending = others.length;
+    for (const s of others) s.close(() => { if (--pending === 0) finish(); });
+    return srv;
+  };
+  initLogin(ROOT);
+  const plan = webListenPlan(W);
+  srv.listen(W.port, plan.host, () => {
+    const port = srv.address().port;
+    if (plan.loopback6) {
+      const v6 = http.createServer(handler);
+      peers.push(v6);
+      v6.on('error', (e) => console.error('麦田网页（IPv6 回环）没起来：' + e.message));
+      v6.listen(port, '::1');
+    }
+    const browse = plan.host === '0.0.0.0' || plan.host === '::' ? `http://127.0.0.1:${port}/` : `http://${plan.host.includes(':') ? `[${plan.host}]` : plan.host}:${port}/`;
+    console.log(`麦田网页：${browse} （${plan.open ? `已按 web.host 监听 ${plan.host}，远程仍建议走隧道` : '只在本机'}。口令在 config.json 的 web.key，不写入日志）`);
+  });
   return srv;
 }

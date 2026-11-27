@@ -1,4 +1,5 @@
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+import { tunnelBoardUrl } from './tunnel-url.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 if (!fs.existsSync(CFG)) { console.error('还没有 config.json：先运行 node src/init.mjs（安装向导），或者 node src/demo.mjs 用假数据看看效果'); process.exit(1); }
@@ -12,7 +13,10 @@ const STATE_COLOR = (s) => /已发布|已上线/.test(s) ? 'green' : /已定时|
 const esc = (s) => String(s).replace(/[<>]/g, (c) => ({ '<': '&lt;', '>': '&gt;' }[c]));
 const link = (s) => esc(s).replace(/https?:\/\/[^\s；;，,）)]+/g, (u) => `[${u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 42)}${u.length > 50 ? '…' : ''}](${u})`);
 
-function webUrl() { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'tunnel.json'), 'utf8')).url; } catch { return ''; } }
+function webUrl() {
+  try { return tunnelBoardUrl(fs.readFileSync(process.env.MAITIAN_TUNNEL || path.join(ROOT, 'data', 'tunnel.json'), 'utf8')); }
+  catch { return ''; }
+}
 
 export function toCard(text) {
   const lines = String(text).split('\n').map((l) => l.trim());
