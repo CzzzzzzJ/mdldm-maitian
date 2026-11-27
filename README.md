@@ -282,11 +282,11 @@ iPhone 桌面 / 锁屏常驻显示全平台粉丝、今日涨粉、最新一期�
 
 ### 交流群
 
-想一起聊麦田、多平台运营的，微信扫码进群（1–5 群已满，现在开的是 6 群）：
+想一起聊麦田、多平台运营的，微信扫码进群（1–6 群已满，现在开的是 7 群）：
 
-<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 6 群" /></p>
+<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 7 群" /></p>
 
-> 微信群码 7 天有效（这张 11 月 27 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
+> 微信群码 7 天有效（这张 12 月 4 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
 
 觉得有用就点个 ⭐ Star，这是我继续改下去的动力；遇到问题直接提 [Issue](https://github.com/CzzzzzzJ/mdldm-maitian/issues)。
 
