@@ -30,6 +30,16 @@ const ok = (t) => console.log(`  ✅ ${t}`), bad = (t) => console.log(`  ❌ ${t
 const home = (p) => p.replace(/^~(?=\/|$)/, os.homedir());
 
 const WIN = process.platform === 'win32';
+// 保留管道安装的答题顺序，登录自启通过交互确认或单独运行脚本启用。
+const askWindowsAutostart = () => WIN && tty && yes('启用 Windows 登录自启，并现在启动麦田？', false);
+function installWindowsAutostart() {
+  const { status, error, signal } = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', path.join(ROOT, 'scripts', 'install-windows-autostart.ps1'), '-StartNow', '-NodePath', process.execPath], { stdio: 'inherit' });
+  if (status === 0) return true;
+  bad(`Windows 登录自启注册失败：${error?.message || `PowerShell 退出状态 ${status ?? signal}`}`);
+  tip('可继续手动启动麦田，或按 README 的 Windows 安装说明重试。');
+  return false;
+}
 console.log('\n麦田 · 安装向导\n');
 console.log('一、检查环境');
 const [maj, min] = process.versions.node.split('.').map(Number);
@@ -44,7 +54,8 @@ let cf = false; try { execFileSync('which', ['cloudflared'], { stdio: 'pipe' });
 
 if (fs.existsSync(CFG) && !(await yes('\n已经有 config.json，要重新生成吗？（旧的会备份成 config.json.bak）', false))) {
   console.log('\n保留现有配置。');
-  if (WIN) tip('可按 README 的 Windows 安装说明单独启用登录自启。');
+  if (await askWindowsAutostart()) installWindowsAutostart();
+  else if (WIN) tip('可按 README 的 Windows 安装说明单独启用登录自启。');
   rl.close(); process.exit(0);
 }
 
@@ -79,22 +90,12 @@ console.log('\n三、收尾');
 if (process.platform === 'darwin' && await yes('装成开机自启的守护进程？（推荐，之后自动采数据、发通知）')) {
   spawnSync(path.join(ROOT, 'scripts/install-launchd.sh'), cf && await yes('顺带装远程访问隧道（cloudflared）？', false) ? ['--tunnel'] : [], { stdio: 'inherit' });
 }
-let windowsAutostart = false;
-// 保留管道安装的答题顺序，登录自启通过交互确认或单独运行脚本启用。
-if (WIN && tty && await yes('登录 Windows 后自动启动麦田？', false)) {
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-    '-File', path.join(ROOT, 'scripts', 'install-windows-autostart.ps1'), '-NodePath', process.execPath], { stdio: 'inherit' });
-  windowsAutostart = result.status === 0;
-  if (!windowsAutostart) {
-    bad(`Windows 登录自启注册失败：${result.error?.message || `PowerShell 退出状态 ${result.status ?? result.signal}`}`);
-    tip('可继续手动启动麦田，或按 README 的 Windows 安装说明重试。');
-  }
-}
+const enableWindowsAutostart = await askWindowsAutostart();
 if (chrome && await yes('现在打开专用 Chrome：先从应用商店添加麦田发布助手，再登录各平台？（每个平台扫码或登录一次）')) {
   spawnSync(process.execPath, [path.join(ROOT, 'src/hub.mjs'), 'login'], { stdio: 'inherit' });
 }
-const windowsStart = windowsAutostart
-  ? '下次登录 Windows 时会自动启动麦田。本次可在任务计划程序中运行该任务'
+const windowsStart = enableWindowsAutostart && installWindowsAutostart()
+  ? '登录自启已启用，本次启动结果见上方'
   : '双击安装目录里的 4-start.bat 启动麦田（窗口别关）';
 console.log(`
 完成。接下来：
