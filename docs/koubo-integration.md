@@ -490,3 +490,36 @@ node src/koubo-bridge.mjs --selftest
 
 ### 12.7 与麦田仍存的一处结构差异（如实说明）
 麦田的「等你点发布」靠**飞书卡片**推送提醒（`hub.mjs:226,241`），口播工作台没有飞书集成 → 该提醒位目前由**大屏平台格子状态 + 单期详情页区块**承载，操作路径与麦田一致，只是提醒渠道不同（若要补飞书，需 webhook 与卡片模板，见麦田 `src/feishu.mjs`）。
+
+---
+
+## 十三、轮17：平台隐藏 + 单平台多账号矩阵经营 + 电商带货采集 TOP10（2026-11-27）
+
+> 完整版（含 TOP10 逐项评分、Stars/许可证、闭环图、合规红线、踩坑表）见桌面 `口播工作台-爬虫与数字人全球顶级对标裁决-20261127.md` 第十四章。本章只记录**与麦田原文件直接相关**的部分。
+
+### 13.1 隐藏：完全复用麦田原生 disabled 机制（零改前端）
+麦田 `board.html:361` / `pages.html:426` 自带 `O.health.platforms.filter(p=>p.disabled)` 过滤。口播契约层 `_health()` 只需给不用的平台标 `disabled:true`，大屏卡片与体检行自动消失；开关落在 `C:\zm6-koubo\browser\platforms.json`（默认启用 bilibili/douyin/xhs/channels），系统页启停按钮走 `action({type:'toggle-platform'})` 真写该文件。**实测**：停 bilibili → 大屏 4 卡变 3 卡，恢复 → 4 卡。
+
+### 13.2 矩阵经营：把「一个主体账号的一次分发」映射成麦田的一期
+麦田一期本来就是「内容 × 各平台 task」。新模型：
+
+```
+episode id   = "<job_id>@<account_id>"
+episode name = "真实标题｜主体名"   ← 麦田原生 name=标题｜副标题
+episode.tasks= 该主体该期的平台分发状态
+```
+
+这样 `board.html` hero 的 141 个页签、`pages.html` 流量页的「期 × 平台」141 行表、日历与档案墙，**天然就是矩阵经营视图**，麦田前端一行没改。同平台多账号（B站主号 + B站小号）不是塞进同一期的两个 task（麦田 `PL.map(p=>e.tasks.find(t=>t.platform===p))` 精确匹配会互相覆盖），而是拆成两期，从根上避开冲突——这也印证麦田 `src/targets.mjs` 里 `平台@账号` target id 的设计意图。
+
+状态唯一真相 = `matrix_links`（主体×期×平台）；点麦田原按钮「我已发布」→ `action({type:'mark',id:'<jid>@<aid>'})` 只写该主体那一格，同平台其他账号不受影响。`overview()` 新增 `matrix` 段，口播 SPA 与麦田大屏读同一份台账。分发仍只产 dry-run 回执（`awaiting_user`），**不代替真发**。
+
+### 13.3 电商采集对标结论（摘要）
+TOP10：MediaCrawler(71.8k, NCAL 禁商用) / Spider_XHS(8.5k, 蒲公英 KOL 报价, 无 license) / DouYin_Spider(3.7k, 小黄车+直播礼物, 无 license) / Douyin_TikTok_Download_API(21.5k, Apache-2.0, 可直接跑但无电商字段) / creatorhub(4.2k, 每账号独立 Profile, 无 license) / oba-live-tool(1.8k, 直播带货自动化) / xiaohongshu-mcp(17.2k, Apache-2.0, 单账号) / AiToEarn(28.5k, MIT, 14 平台发布+CPS 结算) / XHS-Downloader(13.4k, GPL-3.0) / res-downloader(21.6k, Apache-2.0, 视频号抓取)。
+**四层组合**：官方联盟 SDK（选品佣金）/ Spider_XHS·星图（达人）/ MediaCrawler·Download_API（评论情报）/ creatorhub·AiToEarn（多账号发布）。
+**红线**：精选联盟/罗盘 GMV 无持续维护开源实现；同一 IP+指纹多账号必封（每账号独立 Profile + 独立代理）；禁 AI 自动点赞关注；NCAL/无 LICENSE 项目不进生产链路。
+
+### 13.4 验收
+L1 47/47、L2 34/34（7 场景真产出）；矩阵端点全 200 真读写；无头 Edge 实测大屏 141 页签 / 流量页 141 行 / 口播 SPA 矩阵卡中文平台名。
+
+### 13.5 运维坑（会影响麦田大屏场景执行）
+CodeBuddy 沙箱会话下，PowerShell `Start-Process` 启的服务**其子进程全部 rc=5 且输出为空**（`cmd echo` / `python -V` / ffmpeg 全中招），使 avatar/gen/cut/voice 假失败。`restart_koubo.ps1` 已改 **Bash 直启优先 + 清 NODE_OPTIONS/LSBOX_AUDIT_SHMEM**，并加真实子进程探针自检；修复后 L2 从 30/34 回到 34/34。
