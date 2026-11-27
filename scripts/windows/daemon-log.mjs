@@ -2,11 +2,24 @@
 import fs from 'node:fs';
 
 const dataDir = new URL('../../data/', import.meta.url);
-fs.mkdirSync(dataDir, { recursive: true });
-const log = fs.openSync(new URL('daemon.log', dataDir), 'a');
+const logPath = new URL('daemon.log', dataDir);
+let log;
+let warned = false;
 
 function writeLog(text) {
-  fs.appendFileSync(log, text.replace(/(\?key=)[^&#\s]+/g, '$1[已隐藏]'));
+  try {
+    if (log === undefined) {
+      fs.mkdirSync(dataDir, { recursive: true });
+      log = fs.openSync(logPath, 'a');
+    }
+    fs.appendFileSync(log, text.replace(/(\?key=)[^&#\s]+/g, '$1[已隐藏]'));
+  } catch (error) {
+    if (warned) return;
+    warned = true;
+    // 直接写 stderr，避免再次进入日志钩子。计划任务也可能没有可用的 stderr。
+    try { fs.writeSync(2, `麦田运行日志写入失败 ${error.message}\n`); }
+    catch { /* 日志故障不影响守护进程。 */ }
+  }
 }
 
 const lifecycle = (message) => writeLog(`[${new Date().toISOString()}] ${message}\n`);
