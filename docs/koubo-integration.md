@@ -405,3 +405,50 @@ node src/koubo-bridge.mjs --selftest
 * 采集依赖**你本人先在专用 Edge 里完成扫码登录**；未登录时返回「尚未登录：先点该平台图标登录」，**不绕过平台风控、不逆向签名、不伪造数据**。
 * 实测抖音在专用实例中弹出了自己的风控校验页（`rc-verifycenter`），这是平台侧正常风控，脚本不做对抗。
 * 调试端口仅 127.0.0.1；profile 与日常浏览隔离；用完可 `node koubo_cdp.mjs stop` 断开（不关用户窗口）。
+
+---
+
+## 十一、轮15：两项待定事项的评估与落地做法（2026-11-27）
+
+> 待定项：① 麦田「粉丝 / 站点转化」两域在口播无真值（现走麦田原生空态），要真数据怎么做；
+> ② 是否 push 到仓库 / 开 PR。
+
+### 11.1 项① 评估结论（结论先行）
+
+**「粉丝」和「发布后播放」现在已经能做真数据——因为登录态通道已建成。** 原判断"口播没有粉丝数据"是在**没有浏览器通道时**的结论，现在前提变了：
+
+| 麦田数据域 | 上一轮判断 | 现在 | 做法 |
+|---|---|---|---|
+| 发布后播放（每期×平台） | 只能用"分发条数代理" | **可真采** | B站创作中心 `/x/web/archives` 的 `stat.view/like/reply/favorite/share` 就是真实播放与互动（页面上下文带 cookie） |
+| 平台粉丝 | 无真值 | **可真采** | 移植麦田 `followers.mjs` 的公开接口：B站 `/x/web/index/stat`（total_fans/incr_fans）+ `/x/web/data/v2/overview/stat/graph?type=fan`（90天趋势）、抖音 `/web/api/media/user/info/`（follower_count）、小红书 `/api/galaxy/creator/data/fans/overall_new`（fans_count + 30天）、视频号 shadow DOM「关注者总数 \| N」、YouTube「当前订阅人数」 |
+| 站点转化（注册/会员/收入） | 无真值 | **仍无**（口播没有站点，也没有 utm_campaign 归因） | 三选一（见下） |
+
+**已落地（本轮）**：
+* `koubo_cdp.mjs` 新增 `FOLLOWERS` 采集器（B站/抖音/小红书/视频号/YouTube）与 `followers` / `collect-all` 命令；账号作品采集结果落盘缓存 `C:/zm6-koubo/browser/accounts/<platform>.json`，粉丝落盘 `followers\<platform>.json`。
+* `koubo_maitian.py` 新增 `_account_cache()` / `_followers_cache()` / `_merge_account_data()`：把真实账号数据**按标题关联**回填到每一期的 `tasks[].m`（播放/赞/评/藏/转）→ 麦田「流量」页的每期×平台矩阵显示真实播放量；粉丝数据进 `followers[]` → 麦田「粉丝」面板自动有真数据。
+* **口径自动切换**：有真实账号数据时标签回到麦田语义（播放量/互动/互动率/粉丝）；没有时保持诚实口径（分发条数/已发布/发布率/采集来源）。绝不把代理值当播放量展示。
+* 麦田系统页「采粉丝」「采账号流量」按钮**真接通**（支持单平台与批量），未登录时逐平台如实回报「需先登录」（实测：`bilibili/xhs → need_login`，其余 `count:0`）。
+
+**唯一前提**：你本人先在专用 Edge 里扫码登录（脚本不接触密码）。登录后点一次「采账号流量」「采粉丝」，大屏即从"分发条数代理"升级为真实播放量与真实粉丝。
+
+**「站点转化」的处理建议（三选一）**：
+1. **推荐 · 保持未接入**（当前状态）：口播工作台没有站点、没有 utm 归因体系，麦田原生文案「还没接你自己的站点」就是正确表达，不造假。
+2. **若你有课程站/会员站**：按麦田 `src/site.mjs` 契约提供两个**只读**接口（`coursesApi` 课程列表、`dashboardApi` 仪表盘，注册/会员/收入/渠道/按期 campaign 统计），在口播侧加一个 `site` 适配器（读同一个 `koubo_board.site`），即可让麦田「转化」页变成真实漏斗。
+3. **不推荐**：用口播的"选题→成片→发布"内部计数冒充"注册/收入"——那是两回事，会把不可比的数混进转化漏斗。
+
+### 11.2 项② 评估结论（版本管理与提交）
+
+| 方案 | 可行性 | 判断 |
+|---|---|---|
+| push 到上游 `CzzzzzzJ/mdldm-maitian` | **不可行**（无权限，且是他人仓库） | 不做 |
+| 在你账号下 fork → 推分支 → 开 PR | 可行，需你提供 fork 仓库地址或 token | 你点头我再做；PR 内容就是 `src/koubo-bridge.mjs` + `docs/koubo-integration.md` 两处集成 |
+| **把口播工程纳入 git 管理**（推荐） | 可行，`智漫6-orchestrator` 目前**不在任何版本库**里，14 轮改动无提交记录 | **建议做**：`git init` + `.gitignore`（排除 `artifacts/`、`__pycache__`、`*.log`、`*.bak*`）+ 首次提交（源码与配置入库，产物不入库） |
+| 继续现状（只本地 commit 麦田克隆） | 可行 | 已如此；但口播侧无版本保护，回滚靠人工 |
+
+**建议执行顺序**：① 先给口播工程 `git init`（一次提交锁住当前可用状态，作为回滚基线）→ ② 你提供 fork/token 后再向麦田上游提 PR（集成代码只有两个文件，评审成本低）→ ③ 站点转化按 11.1 的方案 2 或 1 定。
+
+### 11.3 本轮修的 bug
+`collect-all` 分支被前置"未知平台"校验拦截（空 arg 直接 return，批量成为死代码）→ 放行 `cmd==='collect-all'`；批量采集结果需逐平台回报（此前 `result:{}` 空）。
+
+### 11.4 验收
+`metrics-accounts`（批量）→ 「没有已登录的平台」+ hint「以下平台需先登录：bilibili、xhs」；`followers`（批量）→「没有平台处于已登录状态：请先点平台图标登录」；`followers/bilibili`→「尚未登录：先点该平台图标登录，再采集粉丝」；`overview.account_data = {filled_tasks:0, metric_rows:0, follower_platforms:[]}`，标签仍为诚实口径「分发条数」；L1 **47/47**、L2 **33/33**。
