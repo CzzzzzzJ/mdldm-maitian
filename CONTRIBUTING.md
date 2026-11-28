@@ -28,7 +28,8 @@
 
 ## 提 PR 前
 
-- 一个 PR 只做一件事。大改动先开 issue 或在 [Discussions](https://github.com/CzzzzzzJ/mdldm-maitian/discussions) 里聊方案。
+- 一个 PR 只做一件事。接一个新平台可以同时改规则、适配器和采集，这算一件事；但不要把多个平台、或多件互不依赖的功能放进同一个 PR。这类 PR 会直接关闭，请拆开再提。
+- 大改动，或会改到账号、登录态、调度这些公共结构的，先开 issue 或在 [Discussions](https://github.com/CzzzzzzJ/mdldm-maitian/discussions) 里聊方案，确认后再动手。
 - 不要提交任何账号、Cookie、token、个人数据或截图里的隐私信息。
 - `node --test tests/` 能过；改了页面逻辑，附一张前后对比截图。
 - 写清楚在什么系统、什么版本上验证过。
