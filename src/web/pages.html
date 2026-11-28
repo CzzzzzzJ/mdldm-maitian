@@ -216,10 +216,77 @@ function vArchive() {
     <div class="tx"><div class="ep">第 ${esc(e.episode)} 期 · ${when(e.publishAt || e.schedule || e.createdAt)}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.filter(t => t.state !== 'skipped').length} 已发布</span></div></div></a>`).join('')}</div>`;
 }
 
+const archiveNotesLabel = a => [a.series, a.episode == null ? '' : `第 ${a.episode} 期`].filter(Boolean).join(' · ');
+function archiveNotesHTML(a) {
+  const section = (p, i) => `<fieldset><legend>${esc(p.name)}</legend>
+    <label>标题<input name="p${i}-title" maxlength="200" value="${esc(p.edits.title ?? p.original.title)}"></label>
+    <label>正文<textarea name="p${i}-body" maxlength="3000">${esc(p.edits.body ?? p.original.body)}</textarea></label>
+    <label>标签<input name="p${i}-tags" maxlength="300" value="${esc(p.edits.tags ?? p.original.tags)}"></label>
+    <button type="button" class="btn" data-reset-platform="${i}">恢复原文案</button></fieldset>`;
+  return `<details class="panel archive-notes"><summary><b>查看或编辑本地档案</b><span data-archive-metadata>${esc(archiveNotesLabel(a))}</span></summary>
+    <p>保存只更新本地档案，不修改发布工程、发布存档或平台上的作品。</p>
+    <form id="archive-notes-form">
+      <label>视频系列（可选）<input name="series" maxlength="120" value="${esc(a.series)}"></label>
+      <label>期数（可选）<input name="episode" type="number" min="1" step="1" max="9007199254740991" value="${esc(a.episode ?? '')}"></label>
+      <label>审核备注<textarea name="notes" maxlength="3000">${esc(a.notes)}</textarea></label>
+      ${a.platforms.map(section).join('')}
+      <div class="btns"><button type="submit" class="btn pri">保存本地档案</button><span role="status"></span></div>
+    </form></details>`;
+}
+
+function bindArchiveNotes(id, a) {
+  const form = $('#archive-notes-form');
+  if (!form || !a || form.dataset.bound) return;
+  form.dataset.bound = "true";
+  const status = form.querySelector('[role="status"]');
+  const names = ['title', 'body', 'tags'];
+  const controls = [...form.elements];
+  const baseline = new Map(controls.filter(el => el.name).map(el => [el.name, el.value]));
+  const resetting = new Set();
+  for (const reset of form.querySelectorAll('[data-reset-platform]')) reset.addEventListener('click', () => {
+    const i = +reset.dataset.resetPlatform;
+    resetting.add(i);
+    for (const key of names) form.elements.namedItem(`p${i}-${key}`).value = a.platforms[i].original[key];
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const val = key => form.elements.namedItem(key).value;
+    const changes = {};
+    for (const key of ['series', 'episode', 'notes']) if (val(key) !== baseline.get(key))
+      changes[key] = key === 'episode' ? (val(key) ? Number(val(key)) : null) : val(key);
+    for (const [i, p] of a.platforms.entries()) {
+      const fields = {};
+      for (const key of names) {
+        const name = `p${i}-${key}`;
+        if (resetting.has(i) && val(name) === p.original[key]) fields[key] = null;
+        else if (val(name) !== baseline.get(name) || resetting.has(i)) fields[key] = val(name);
+      }
+      if (Object.keys(fields).length) (changes.platforms ??= {})[p.id] = fields;
+    }
+    if (!Object.keys(changes).length) { status.textContent = '没有修改'; return; }
+    for (const control of controls) control.disabled = true;
+    status.textContent = '';
+    try {
+      const result = await fetch('/api/archive-notes?id=' + encodeURIComponent(id), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ revision: a.revision, changes }),
+      });
+      const value = await result.json();
+      if (!result.ok) throw new Error(value.error || '保存失败');
+      a = value;
+      form.closest('details').querySelector('[data-archive-metadata]').textContent = archiveNotesLabel(a);
+      for (const control of controls) if (control.name) baseline.set(control.name, control.value);
+      resetting.clear();
+      status.textContent = '已保存本地档案';
+    } catch (error) { status.textContent = error.message || '保存失败'; }
+    finally { for (const control of controls) control.disabled = false; }
+  });
+}
+
 async function vEpisode(id) {
   const e = await api('/api/episode?id=' + encodeURIComponent(id)), [t1, t2] = e.name.split(/[｜|]/).map(x => x.trim());
+  const a = await api('/api/archive-notes?id=' + encodeURIComponent(id)).catch(() => null);
   const todo = e.tasks.filter(t => ['awaiting_user', 'filled'].includes(t.state));
-  after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
+  after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); bindArchiveNotes(id, a); };
   return `<a class="back" href="#/archive">‹ 档案</a>
   <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}&v=${e.coverVer || ''}" alt="">` : '<div></div>'}
     <div><div class="eyebrow">第 ${esc(e.episode)} 期</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
@@ -233,6 +300,7 @@ async function vEpisode(id) {
   ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn && !O.siteSalesOnly ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
     ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn && !O.siteSalesOnly ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
   ${sec('播放走势', '每次采样一个点')}<div class="panel"><div class="chartbox" id="c-line"></div></div>
+  ${a ? archiveNotesHTML(a) : ''}
   ${sec('当时发的文案', e.snapshotAt ? `存档于 ${when(e.snapshotAt)}` : '没有存档，显示的是工程目录里现在的内容')}
   <div class="panel">${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => `<details><summary>${logo(t.platform)}<b>${esc(PN[t.platform] || t.name)}</b><span>${esc(t.copy.title || t.copy.body.slice(0, 50))}</span></summary>${t.copy.title ? `<div class="copy"><b>${esc(t.copy.title)}</b></div>` : ''}${t.copy.body ? `<div class="copy">${esc(t.copy.body)}</div>` : ''}${t.copy.tags.length ? `<div style="margin-top:8px;font-size:12.5px;color:var(--t3)">${t.copy.tags.map(x => '#' + esc(x)).join('  ')}</div>` : ''}${t.shot ? `<img class="shot" loading="lazy" src="/shot?id=${encodeURIComponent(e.id)}&p=${t.platform}" alt="提交前的页面截图">` : ''}</details>`).join('')}</div>
   ${sec('过程记录')}<div class="panel"><div class="mono">${e.logs.length ? e.logs.map(l => { let r = l.result || ''; try { const j = JSON.parse(r); r = [j.status, j.url, j.note].filter(Boolean).join('  '); } catch {} return `${when(l.ts)}  ${esc(PN[l.platform] || l.platform || '-')}  ${esc(l.action)}  ${esc(r)}`; }).join('\n') : '没有记录'}</div></div>`;

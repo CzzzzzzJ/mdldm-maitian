@@ -8,6 +8,7 @@ import { learnOn, learnUrl } from './learn.mjs';
 import { buildSalesSummary, salesDateRange } from './sales.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
+import { readArchiveNotes, saveArchiveNotes } from './archive-notes.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
@@ -227,6 +228,37 @@ async function handle(req, res) {
       feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', platforms: platformList() }, now: new Date().toISOString() });
   }
   if (u.pathname === '/site-logo') { const f = SITE && config.site.logo && path.resolve(ROOT, config.site.logo); return f && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
+  if (u.pathname === '/api/archive-notes') {
+    if (!W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access)))
+      return send(res, 401, { error: '开启登录或访问口令后才能编辑本地档案' });
+    const id = u.searchParams.get('id');
+    if (!id) return send(res, 400, { error: '缺少档案编号' });
+    try {
+      if (req.method === 'GET') return send(res, 200, readArchiveNotes(id));
+      if (req.method !== 'POST') return send(res, 405, { error: '不支持的请求方法' }, undefined, { allow: 'GET, POST' });
+      const origin = req.headers.origin;
+      const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+      if (['cross-site', 'same-site'].includes(req.headers['sec-fetch-site']) || (origin && origin !== `${protocol}://${req.headers.host}`))
+        return send(res, 403, { error: '不接受其他网站发起的操作' });
+      if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || ''))
+        return send(res, 415, { error: '只接受 JSON 请求' });
+      const buffers = [];
+      let length = 0;
+      for await (const chunk of req) {
+        length += chunk.length;
+        if (length > 64 * 1024) { buffers.length = 0; continue; }
+        buffers.push(chunk);
+      }
+      if (length > 64 * 1024) return send(res, 413, { error: '请求太大' });
+      let body;
+      try { body = JSON.parse(Buffer.concat(buffers).toString('utf8')); }
+      catch { return send(res, 400, { error: '请求格式不对' }); }
+      return send(res, 200, saveArchiveNotes(id, body));
+    } catch (err) {
+      const status = [400, 404, 409].includes(err.status) ? err.status : 500;
+      return send(res, status, { error: status === 500 ? '无法读取或保存档案' : err.message });
+    }
+  }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
   if (u.pathname === '/cover' || u.pathname === '/shot') {
     const ep = getEpisode(u.searchParams.get('id')); if (!ep) return send(res, 404, '');

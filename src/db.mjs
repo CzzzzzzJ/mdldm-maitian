@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS board_records (tbl TEXT, key TEXT, record_id TEXT, PR
 CREATE TABLE IF NOT EXISTS site_daily (day TEXT PRIMARY KEY, reg INTEGER, vip INTEGER, orders INTEGER, revenue REAL);
 CREATE TABLE IF NOT EXISTS site_orders (id TEXT PRIMARY KEY, title TEXT, amount REAL, status TEXT, time TEXT, kind TEXT);
 CREATE INDEX IF NOT EXISTS site_orders_time ON site_orders(time DESC, id DESC);
+CREATE TABLE IF NOT EXISTS archive_notes (episode_id TEXT PRIMARY KEY, edits TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshots (episode_id TEXT PRIMARY KEY, taken_at TEXT, project TEXT);
 CREATE TABLE IF NOT EXISTS site_campaigns (campaign TEXT PRIMARY KEY, sources TEXT, reg INTEGER, vip INTEGER, orders INTEGER, revenue REAL, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS samples (ts TEXT, episode_id TEXT, platform TEXT, views INTEGER, likes INTEGER, comments INTEGER, favorites INTEGER, shares INTEGER, PRIMARY KEY (ts, episode_id, platform));
