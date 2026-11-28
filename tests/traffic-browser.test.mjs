@@ -3,6 +3,22 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { chromeStartGuard } from '../src/chrome-start.mjs';
+
+test('Chrome 启动失败后短期内只复查端口，不重复启动', async () => {
+  let reachable = false, starts = 0, now = 0;
+  const guard = chromeStartGuard(async () => reachable, async () => {
+    starts++; throw new Error('调试端口 12345 不可用');
+  }, () => now);
+  await assert.rejects(guard(), /12345/);
+  await assert.rejects(guard(), /12345/);
+  assert.equal(starts, 1);
+  reachable = true;
+  await guard();
+  reachable = false; now = 61000;
+  await assert.rejects(guard(), /12345/);
+  assert.equal(starts, 2);
+});
 
 test('traffic Chrome profiles keep local tabs/sessions separate and preserve the default publishing browser', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'maitian-shim-test-'));
