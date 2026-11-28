@@ -27,17 +27,34 @@ function pageContext() {
   return ctx;
 }
 
-test('new platform cards separate account totals, unknown fans and period-only net', async () => {
-  const {ctx,screen} = boardContext();
+test('platform cards switch together while keeping real zero and period-only net separate', async () => {
+  const {ctx,screen,listeners} = boardContext();
   const data = {...fixture(null), siteOn:false, siteSalesOnly:false, metrics:[], samples:[],
     health:{platforms:[{id:'acfun'},{id:'kuaishou'}]},
     channelAccounts:{acfun:{videos:22,views:14661,syncedAt:'2026-11-28T08:00:00Z'},kuaishou:{videos:64,views:0}},
-    kuaishouFanPeriod:{days:7,net:-1}};
+    accountPlaybackHistory:[{platform:'acfun',day:'2026-11-17',views:14661},{platform:'kuaishou',day:'2026-11-17',views:0}],
+    followers:[{platform:'acfun',day:'2026-11-17',total:72}], kuaishouFanPeriod:{days:7,net:-1}};
   ctx.fetch = async () => ({ok:true,json:async()=>data});
   await vm.runInContext('load()',ctx);
-  for (const item of ['platform-acfun.png','platform-kuaishou.png','公开作品','账号累计播放','14,661','暂无粉丝总数','近 7 天净增']) assert.ok(screen.innerHTML.includes(item),item);
-  assert.match(screen.innerHTML, /账号累计播放<\/dt><dd>0<\/dd>/);
-  assert.doesNotMatch(screen.innerHTML, /<dt>账号累计播放<\/dt><dd>–<\/dd>/);
+  for (const item of ['platform-acfun.png','platform-kuaishou.png','总数未提供','暂无逐日粉丝数据','近 7 天净增','11-17','<ellipse']) assert.ok(screen.innerHTML.includes(item),item);
+  assert.doesNotMatch(screen.innerHTML, /14,661/);
+  const target = { closest:s => s === '[data-card-metric]' ? {dataset:{cardMetric:'plays'}} : null };
+  listeners.click.forEach(fn => fn({target}));
+  assert.match(screen.innerHTML, /data-card-metric="plays" aria-pressed="true"/);
+  assert.match(screen.innerHTML, /14,661/);
+  assert.match(screen.innerHTML, /<div class="val"[^>]*>0<\/div>/);
+  assert.doesNotMatch(screen.innerHTML, /近 7 天净增/);
+  await vm.runInContext('load()',ctx);
+  assert.match(screen.innerHTML, /data-card-metric="plays" aria-pressed="true"/);
+});
+
+test('platform sparkline connects two consecutive days but leaves a gap before an isolated sample', () => {
+  const {ctx} = boardContext();
+  const html = vm.runInContext(`sparkLine('acfun',{'2026-11-01':0,'2026-11-02':2,'2026-11-04':4},['2026-11-01','2026-11-02','2026-11-03','2026-11-04'],'粉丝')`,ctx);
+  assert.equal((html.match(/<polyline/g) || []).length,1);
+  assert.match(html, /<ellipse[^>]*cx="198\.0"/);
+  assert.match(html, /11-01.*0/);
+  assert.match(html, /11-04.*4/);
 });
 
 test('dashboard displays canonical today, week and month values and five escaped order events', async () => {

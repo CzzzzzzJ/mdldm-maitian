@@ -48,16 +48,21 @@ export function accountTrafficView(db, ids) {
   const placeholders = ids.map(() => '?').join(',');
   const videos = db.prepare(`SELECT platform,id,title,url,published_at AS publishedAt,views,likes,comments,favorites,shares,collected_at AS collectedAt
     FROM account_videos WHERE active=1 AND platform IN (${placeholders}) ORDER BY published_at DESC,platform,id`).all(...ids);
-  const history = db.prepare(`SELECT d.day,d.platform,d.views,d.videos FROM account_traffic_daily d
-    LEFT JOIN account_traffic_verified v ON v.platform=d.platform
-    WHERE d.platform IN (${placeholders}) AND d.day>=date('now','-30 day')
-      AND (d.platform<>'kuaishou' OR d.videos<>0 OR d.collected_at>=v.synced_at) ORDER BY d.day,d.platform`).all(...ids);
+  const history = accountPlaybackHistory(db, ids);
   const saved = db.prepare(`SELECT s.platform AS id,s.synced_at AS syncedAt,s.count,s.error,v.synced_at AS verifiedAt
     FROM account_traffic_state s LEFT JOIN account_traffic_verified v ON v.platform=s.platform
     WHERE s.platform IN (${placeholders})`).all(...ids).map(({ verifiedAt, ...s }) =>
       s.id === 'kuaishou' && s.count === 0 && (!verifiedAt || s.syncedAt < verifiedAt)
         ? { ...s, syncedAt:null, count:null, error:s.error || '旧记录未核实，请重新采集' } : s);
   return { videos, history, statuses: ids.map(id => saved.find(s => s.id === id) || {id,syncedAt:null,count:0,error:''}) };
+}
+
+export function accountPlaybackHistory(db, ids) {
+  if (!ids.length) return [];
+  return db.prepare(`SELECT d.day,d.platform,d.views,d.videos FROM account_traffic_daily d
+    LEFT JOIN account_traffic_verified v ON v.platform=d.platform
+    WHERE d.platform IN (${ids.map(() => '?').join(',')}) AND d.day>=date('now','+8 hours','-29 days')
+      AND (d.platform<>'kuaishou' OR d.videos<>0 OR d.collected_at>=v.synced_at) ORDER BY d.day,d.platform`).all(...ids);
 }
 
 export async function syncAccountTraffic({ db, targets, read, currentTargets = () => targets }) {

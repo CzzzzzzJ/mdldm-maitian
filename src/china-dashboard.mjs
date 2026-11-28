@@ -6,7 +6,7 @@ export function accountSummaries(db, ids) {
       ON d.platform=s.platform AND d.collected_at=s.synced_at
     LEFT JOIN account_traffic_verified v ON v.platform=s.platform WHERE s.platform=?`);
   const out = {};
-  for (const id of ids.filter(isExtraManual)) {
+  for (const id of ids) {
     const row = read.get(id);
     if (!row) continue;
     const { verifiedAt, ...data } = row;

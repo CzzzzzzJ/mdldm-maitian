@@ -75,6 +75,8 @@ test('auth and explicit work ID are required to add a historical episode associa
   assert.equal((await link('one','https://www.kuaishou.com/short-video/other')).status,409);
   const after=await fetch(base+'/api/overview',{headers}).then(r=>r.json());
   assert.equal(after.channelAccounts.kuaishou.views,5);
+  assert.ok(after.accountPlaybackPlatforms.includes('kuaishou'));
+  assert.deepEqual(after.accountPlaybackHistory.filter(r=>r.platform==='kuaishou').map(r=>r.views),[5]);
   assert.equal(after.episodes.find(e=>e.id==='one').views,0);
   assert.equal(after.episodes.find(e=>e.id==='one').tasks[0].m.views,0);
   assert.equal(after.episodes.find(e=>e.id==='one').inter,3);

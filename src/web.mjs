@@ -22,6 +22,8 @@ const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
 import { extraEnabled, isExtraManual } from './publish-channels.mjs';
+import { accountTargets } from './account-targets.mjs';
+import { accountPlaybackHistory } from './account-traffic.mjs';
 import { accountSummaries, accountWorkId, accountWorkForUrl, accountCandidates, workLinkedElsewhere, inWriteTransaction } from './china-dashboard.mjs';
 const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'threads', ...extraEnabled(config), ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
@@ -271,9 +273,12 @@ async function handle(req, res) {
       orders: readable ? db.prepare('SELECT id,title,amount,status,time,kind FROM site_orders ORDER BY time DESC,id DESC LIMIT 10').all() : [],
       syncedAt: readable && getMeta('siteLiveSyncedAt'), ordersSyncedAt: readable && getMeta('siteOrdersSyncedAt'), error: getMeta('siteError'), ordersError: getMeta('siteOrdersError') }) : null;
     const enabled = chinaEnabled();
+    let accountIds = enabled;
+    try { accountIds = accountTargets(config).filter(t => t.id === t.platform).map(t => t.id); } catch {}
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
-      channelAccounts: accountSummaries(db, enabled), kuaishouFanPeriod: enabled.includes('kuaishou') ? fanPeriod() : null,
+      channelAccounts: accountSummaries(db, accountIds), accountPlaybackHistory: accountPlaybackHistory(db, accountIds),
+      accountPlaybackPlatforms: accountIds, kuaishouFanPeriod: enabled.includes('kuaishou') ? fanPeriod() : null,
       site: { days: siteDays, channels: readable && !salesOnly ? db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all() : [],
         campaigns: readable && !salesOnly ? db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all() : [], campaignsOn: SITE && !salesOnly && getMeta('siteCampaigns') === 'on', ...(sales && { sales }) },
       metrics: db.prepare('SELECT day, episode_id, platform, views, likes, comments, favorites, shares FROM metrics ORDER BY day').all(),
