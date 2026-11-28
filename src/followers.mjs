@@ -26,6 +26,18 @@ export const followerCollectors = {
     const r = await withTab('https://creator.xiaohongshu.com/statistics/fans-data', async (t) => { await sleep(3000); return evaluate(t, `${get('/api/galaxy/creator/data/fans/overall_new')}.then(x=>{const d=x.data.thirty,m=(a)=>Object.fromEntries((a||[]).map(i=>[i.date,i.count]));const g=m(d.rise_fans_list),l=m(d.leave_fans_list);return {total:d.fans_count,list:(d.fans_list||[]).map(i=>({date:i.date,total:i.count,gain:g[i.date],loss:l[i.date]}))}})`); });
     return r && r.total != null && { total: r.total, history: r.list.map(x => ({ day: dayOf(x.date), total: x.total, gain: x.gain ?? null, loss: x.loss ?? null })) };
   },
+  async kuaishou() {
+    const text = await withTab('https://cp.kuaishou.com/', async (t) => {
+      for (let i = 0; i < 8; i++) {
+        await sleep(2000);
+        const value = await evaluate(t, `document.body.innerText`).catch(() => '');
+        if (/粉丝/.test(value)) return value;
+      }
+      return '';
+    }, { wait: 9000 });
+    const total = num(((text || '').match(/(?:粉丝数|粉丝总数|粉丝)\s*[:：]?\s*([\d,.万亿KM]+)/i) || [])[1]);
+    return total != null && { total, history: [] };
+  },
   async channels() {
     const text = await withTab('https://channels.weixin.qq.com/platform/statistic/follower', async (t) => { for (let i = 0; i < 8; i++) { await sleep(2000); const s = await evaluate(t, SHADOW_TEXT).catch(() => ''); if (/关注者总数 \| \d/.test(s) && /\d{4}\/\d+\/\d+ \|/.test(s)) return s; } return evaluate(t, SHADOW_TEXT); }, { wait: 9000 });
     const total = num(((text || '').match(/关注者总数 \| ([\d,.万]+)/) || [])[1]); if (total == null) return null;
@@ -88,8 +100,9 @@ export function saveFollowers(platform, r) {
 }
 export async function collectFollowers(only, skip = []) {
   const out = {}, off = new Set([...(config.disabled || []), ...skip]);
+  const optedIn = new Set((config.batches || []).flat());
   for (const [p, fn] of Object.entries(followerCollectors)) {
-    if ((p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p)) continue;
+    if ((p === 'kuaishou' && !optedIn.has('kuaishou')) || (p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p)) continue;
     try { const r = await fn(); if (!r) { out[p] = '没读到'; continue; } const n = saveFollowers(p, r); out[p] = { total: r.total, backfilled: n }; }
     catch (e) { out[p] = '出错：' + e.message.slice(0, 80); }
   }

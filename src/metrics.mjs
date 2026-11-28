@@ -44,6 +44,26 @@ export const collectors = {
     const st = await withTab('https://creator.douyin.com/creator-micro/content/manage', async (t) => { for (let i = 0; i < 15 && !(await evaluate(t, `document.querySelectorAll('[class*=video-card-info]').length`).catch(() => 0)); i++) await sleep(2000); await sleep(1500); return evaluate(t, `(()=>{for(const c of document.querySelectorAll('[class*=video-card-info]')){const k=Object.keys(c).find(k=>k.startsWith('__reactFiber'));let f=c[k];for(let i=0;i<25&&f;i++,f=f.return){const pr=f.memoizedProps;if(!pr)continue;const v=Object.values(pr).find(v=>v&&typeof v==='object'&&v.aweme_id&&v.desc!==undefined);if(v){if((${J(id)}&&v.aweme_id===${J(id)})||v.item_title===${J(p.title)})return v.statistics||null;break;}}}return null})()`); }, { wait: 6000 });
     return st && { views: st.play_count, likes: st.digg_count, comments: st.comment_count, favorites: st.collect_count, shares: st.share_count };
   },
+  async kuaishou({ url, p }) {
+    const id = idOf(url, /short-video\/([\w-]+)/);
+    const text = await withTab('https://cp.kuaishou.com/article/manage/video', async (t) => {
+      await sleep(4000);
+      return evaluate(t, `(()=>{const id=${J(id)}, title=${J((p && p.title) || '')}, stat=/播放|点赞|评论|分享/;
+        const links=[...document.querySelectorAll('a[href]')];
+        const a=id?links.find(e=>(e.getAttribute('href')||'').includes(id)||(e.href||'').includes(id)):null;
+        const cardOf=(el)=>{let best=el; for(let n=el;n&&n!==document.body;n=n.parentElement){const t=n.innerText||''; if(!stat.test(t)) continue;
+          const others=[...n.querySelectorAll('a[href]')].filter(x=>x!==a&&/short-video|photoId|workId/.test(x.href||'')&&!(id&&(x.href||'').includes(id)));
+          if(others.length) break; best=n;} return best;};
+        if(a) return cardOf(a).innerText||'';
+        if(!title) return null;
+        const nodes=[...document.querySelectorAll('article,[class*=card]')].filter(e=>(e.innerText||'').includes(title));
+        nodes.sort((x,y)=>x.innerText.length-y.innerText.length);
+        return nodes[0]?nodes[0].innerText:null})()`);
+    }, { wait: 8000 });
+    if (!text) return null;
+    const get = (label) => num((text.match(new RegExp(label+'\\s*([\\d,.万亿KM]+)','i'))||[])[1]);
+    return { views: get('播放'), likes: get('点赞'), comments: get('评论'), shares: get('分享') };
+  },
   async channels({ p }) {
     // publish.json 里视频号写的是 desc（不是 body），取不到 body 时按 desc / 短标题退回，否则会抛 TypeError 一直读不到数
     const src = String((p && (p.body || p.desc || p.shortTitle || p.title)) || '');

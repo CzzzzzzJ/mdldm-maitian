@@ -63,11 +63,11 @@ const projectOf = (ep, pj) => ({ dir: path.relative(config.rootPath, ep.dir), da
 // 停用的平台：config.disabled（系统页里开关）。从登录、体检、保活、发布、采粉丝里都去掉
 // 每次现读 config.disabled：网页「系统 → 平台」改的是同一个 config 对象，守护进程不用重启就生效
 export const DISABLED = { has: (id) => (config.disabled || []).includes(id) };
-const ALL_IDS = ['bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram', 'threads', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : []), 'zsz'];
+const ALL_IDS = ['bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram', 'threads', ...(config.batches?.flat().includes('kuaishou') ? ['kuaishou'] : []), ...(config.batches?.flat().includes('wechat') ? ['wechat'] : []), 'zsz'];
 // 每次都重算：知识站可能在系统页停用（SITE 热更新），停用的平台由 config.disabled 决定
 const canPublish = id => id !== 'zsz' || !SITE?.salesOnly;
 const ALL = () => ALL_IDS.filter(id => (id !== 'zsz' || SITE) && !DISABLED.has(id) && canPublish(id));   // 没配自有站点就不管 zsz；停用的不管
-const LOGIN_PAGES = { wechat: 'https://mp.weixin.qq.com/', bilibili: 'https://member.bilibili.com/platform/upload/video/frame', xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video', douyin: 'https://creator.douyin.com/creator-micro/content/upload', channels: 'https://channels.weixin.qq.com/platform/post/create', youtube: 'https://studio.youtube.com/', x: 'https://x.com/home', instagram: 'https://www.instagram.com/', threads: 'https://www.threads.com/', get zsz() { return SITE ? SITE.admin : ''; } };
+const LOGIN_PAGES = { wechat: 'https://mp.weixin.qq.com/', bilibili: 'https://member.bilibili.com/platform/upload/video/frame', xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video', douyin: 'https://creator.douyin.com/creator-micro/content/upload', channels: 'https://channels.weixin.qq.com/platform/post/create', kuaishou: 'https://cp.kuaishou.com/article/publish/video', youtube: 'https://studio.youtube.com/', x: 'https://x.com/home', instagram: 'https://www.instagram.com/', threads: 'https://www.threads.com/', get zsz() { return SITE ? SITE.admin : ''; } };
 
 // 上传批次：config.batches 里没写到的平台（比如新接入的 Threads）排在最后单独一批，避免被漏掉
 const BATCHES = () => { const b = config.batches || []; const rest = ALL_IDS.filter(id => !b.flat().includes(id)); return rest.length ? [...b, rest] : b; };
