@@ -13,14 +13,18 @@
   "rootPath": "/Volumes/<NAS 共享名>/视频导出",
   "nasUrl": "smb://<用户名>@<NAS 地址>/<共享名>",
 
-  "batches": [["bilibili", "douyin"], ["xhs", "channels"], ["zsz", "x"], ["youtube"], ["instagram"]],
-  "auto": ["zsz", "x", "youtube", "instagram"],
+  "batches": [["bilibili", "douyin"], ["xhs", "channels"], ["zsz", "x"], ["youtube"], ["instagram", "threads"]],
+  "auto": ["zsz", "x", "youtube", "instagram", "threads"],
   "manual": ["bilibili", "douyin", "xhs", "channels"],
 
   "keepAlive": ["channels"],
   "keepAliveMinutes": 60,
   "disabled": [],
   "sampleHours": 6,
+  "schedules": {
+    "sales": { "mode": "interval", "minutes": 60 },
+    "daemon": { "mode": "interval", "minutes": 60 }
+  },
 
   "xHandle": "你的 X 用户名（不带 @）",
 

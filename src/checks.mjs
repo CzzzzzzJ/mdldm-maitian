@@ -180,3 +180,49 @@ export async function igSubmit(tabId, caption, scheduleIso) {
   }
   return { ok: false, reason: 'Instagram 点了之后 40 分钟还没传完，请人工看一眼（不要再点第二次）' };
 }
+
+// Threads：左侧栏「个人主页」→ /@用户名，找第一行对得上的串文
+const TH_PROFILE = `(()=>{const a=[...document.querySelectorAll('a[href^="/@"]')].find(a=>/个人主页|Profile/.test((a.getAttribute('aria-label')||'')+a.innerText)||a.getBoundingClientRect().x<120);return a?a.getAttribute('href').split('/').slice(0,2).join('/'):null})()`;
+const thHead = (text) => [...firstLine(text)].slice(0, 30).join('');
+const thFind = (head) => `(()=>{const head=${JSON.stringify(head)}.replace(/\\s+/g,'');
+  for(const a of document.querySelectorAll('a[href*="/post/"]')){ if(!a.querySelector('time')) continue;
+    let c=a; for(let i=0;i<10&&c;i++){ c=c.parentElement; if(c&&c.innerText&&c.innerText.replace(/\\s+/g,'').includes(head)) return a.getAttribute('href').split('?')[0]; if(c&&c.querySelectorAll('a[href*="/post/"] time').length>1) break; } }
+  return null})()`;
+
+export async function threadsExisting(text) {
+  const head = thHead(text);
+  return withTab('https://www.threads.com/', async (id) => {
+    let me = null;
+    for (let i = 0; i < 10 && !me; i++) { me = await evaluate(id, TH_PROFILE).catch(() => null); if (!me) await sleep(2000); }
+    if (!me) throw new Error('Threads 没登录或页面没打开');
+    await evaluate(id, `(location.href=${JSON.stringify(me)},1)`);
+    for (let i = 0; i < 8; i++) {
+      await sleep(2500);
+      const h = await evaluate(id, thFind(head)).catch(() => null);
+      if (h) return { state: 'published', detail: 'Threads 上已有这一条', url: `https://www.threads.com${h}` };
+    }
+    return null;
+  }, { wait: 6000 });
+}
+
+// Threads：核对正文和视频，点一次「发布」，等发出来再去主页拿链接。有定时的不点（网页定时麦田不自动设）
+export async function threadsSubmit(tabId, text, scheduleIso) {
+  if (scheduleIso) return { ok: false, reason: 'Threads 这期有定时：请在发帖窗口「…」里手动设定时，再点发布' };
+  const DLG = `[...document.querySelectorAll('div[role=dialog]')].filter(d=>d.querySelector('[contenteditable=true]')).at(-1)`;
+  if (!await evaluate(tabId, `!!(${DLG})`).catch(() => false)) return { ok: false, reason: 'Threads 发帖窗口不见了（页面被关或刷新），要重新填' };
+  const norm = (t) => String(t || '').replace(/\s+/g, '');
+  if (norm(await evaluate(tabId, `(${DLG}).querySelector('[contenteditable=true]').innerText`)) !== norm(text)) return { ok: false, reason: 'Threads 正文和 publish.json 不一致' };
+  if (!await evaluate(tabId, `!!(${DLG}).querySelector('video')`)) return { ok: false, reason: 'Threads 发帖窗口里没有视频' };
+  const BTN = `[...(${DLG}).querySelectorAll('div[role=button],button')].filter(e=>e.getClientRects().length&&/^(发布|Post)$/.test(e.innerText.trim())).at(-1)`;
+  if (!await evaluate(tabId, `!!(${BTN})&&(${BTN}).getAttribute('aria-disabled')!=='true'`)) return { ok: false, reason: 'Threads 找不到可点的「发布」按钮，没点' };
+  await click(tabId, BTN);
+  // 视频是点了之后才开始传：每 30 秒去主页找一次，最多 15 分钟。失败也不重试，避免发重
+  for (let i = 0; i < 30; i++) {
+    await sleep(30000);
+    const err = await evaluate(tabId, `/无法发布|发布失败|出错了|couldn.t post|went wrong/i.test(document.body.innerText)`).catch(() => false);
+    if (err) return { ok: false, reason: 'Threads 页面提示发布失败（没有重试，避免发重；请人工看一眼）' };
+    const e = await threadsExisting(text).catch(() => null);
+    if (e) return { ok: true, state: 'published', detail: '已发布', url: e.url };
+  }
+  return { ok: false, reason: 'Threads 点了发布 15 分钟还没在主页看到，请人工看一眼（不要再点第二次）' };
+}

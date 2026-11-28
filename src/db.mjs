@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS board_records (tbl TEXT, key TEXT, record_id TEXT, PR
 CREATE TABLE IF NOT EXISTS site_daily (day TEXT PRIMARY KEY, reg INTEGER, vip INTEGER, orders INTEGER, revenue REAL);
 CREATE TABLE IF NOT EXISTS site_orders (id TEXT PRIMARY KEY, title TEXT, amount REAL, status TEXT, time TEXT, kind TEXT);
 CREATE INDEX IF NOT EXISTS site_orders_time ON site_orders(time DESC, id DESC);
+CREATE TABLE IF NOT EXISTS archive_notes (episode_id TEXT PRIMARY KEY, edits TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshots (episode_id TEXT PRIMARY KEY, taken_at TEXT, project TEXT);
 CREATE TABLE IF NOT EXISTS site_campaigns (campaign TEXT PRIMARY KEY, sources TEXT, reg INTEGER, vip INTEGER, orders INTEGER, revenue REAL, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS samples (ts TEXT, episode_id TEXT, platform TEXT, views INTEGER, likes INTEGER, comments INTEGER, favorites INTEGER, shares INTEGER, PRIMARY KEY (ts, episode_id, platform));
@@ -35,7 +36,7 @@ for (const name of ['published_at', 'published_title']) {
   if (!taskColumns.has(name)) db.exec(`ALTER TABLE tasks ADD COLUMN ${name} TEXT`);
 }
 const now = () => new Date().toISOString();
-export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', kuaishou: '快手', youtube: 'YouTube', x: 'X', instagram: 'Instagram', wechat: '公众号', zsz: '知识站' };
+export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', kuaishou: '快手', youtube: 'YouTube', x: 'X', instagram: 'Instagram', threads: 'Threads', wechat: '公众号', zsz: '知识站' };
 // 已经到位、不允许再跑的状态（防重）
 export const LOCKED = ['filled', 'awaiting_user', 'scheduled', 'published'];
 export const STATE_CN = { planned: '计划中', pending: '等待', running: '进行中', filled: '已填好', awaiting_user: '待你点发布', scheduled: '已定时', published: '已发布', failed: '异常', not_logged_in: '未登录', stopped: '已停止', skipped: '跳过' };

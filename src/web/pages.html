@@ -19,6 +19,7 @@
 <script src="/static/mt.js"></script>
 <script>
 let S = null, settingsDirty = false;
+let scheduleEditor = null;
 let O = null, I = null, F = {}, timer = null, pick = null;
 const toasted = new Set();
 let doctorPrimed = false;
@@ -216,10 +217,77 @@ function vArchive() {
     <div class="tx"><div class="ep">第 ${esc(e.episode)} 期 · ${when(e.publishAt || e.schedule || e.createdAt)}</div><h3>${esc(e.name)}</h3><div class="mt"><span class="gpill">${e.views > 1 ? fmt(e.views) + ' 播放' : '还没有播放数据'}</span><span class="gpill">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.filter(t => t.state !== 'skipped').length} 已发布</span></div></div></a>`).join('')}</div>`;
 }
 
+const archiveNotesLabel = a => [a.series, a.episode == null ? '' : `第 ${a.episode} 期`].filter(Boolean).join(' · ');
+function archiveNotesHTML(a) {
+  const section = (p, i) => `<fieldset><legend>${esc(p.name)}</legend>
+    <label>标题<input name="p${i}-title" maxlength="200" value="${esc(p.edits.title ?? p.original.title)}"></label>
+    <label>正文<textarea name="p${i}-body" maxlength="3000">${esc(p.edits.body ?? p.original.body)}</textarea></label>
+    <label>标签<input name="p${i}-tags" maxlength="300" value="${esc(p.edits.tags ?? p.original.tags)}"></label>
+    <button type="button" class="btn" data-reset-platform="${i}">恢复原文案</button></fieldset>`;
+  return `<details class="panel archive-notes"><summary><b>查看或编辑本地档案</b><span data-archive-metadata>${esc(archiveNotesLabel(a))}</span></summary>
+    <p>保存只更新本地档案，不修改发布工程、发布存档或平台上的作品。</p>
+    <form id="archive-notes-form">
+      <label>视频系列（可选）<input name="series" maxlength="120" value="${esc(a.series)}"></label>
+      <label>期数（可选）<input name="episode" type="number" min="1" step="1" max="9007199254740991" value="${esc(a.episode ?? '')}"></label>
+      <label>审核备注<textarea name="notes" maxlength="3000">${esc(a.notes)}</textarea></label>
+      ${a.platforms.map(section).join('')}
+      <div class="btns"><button type="submit" class="btn pri">保存本地档案</button><span role="status"></span></div>
+    </form></details>`;
+}
+
+function bindArchiveNotes(id, a) {
+  const form = $('#archive-notes-form');
+  if (!form || !a || form.dataset.bound) return;
+  form.dataset.bound = "true";
+  const status = form.querySelector('[role="status"]');
+  const names = ['title', 'body', 'tags'];
+  const controls = [...form.elements];
+  const baseline = new Map(controls.filter(el => el.name).map(el => [el.name, el.value]));
+  const resetting = new Set();
+  for (const reset of form.querySelectorAll('[data-reset-platform]')) reset.addEventListener('click', () => {
+    const i = +reset.dataset.resetPlatform;
+    resetting.add(i);
+    for (const key of names) form.elements.namedItem(`p${i}-${key}`).value = a.platforms[i].original[key];
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const val = key => form.elements.namedItem(key).value;
+    const changes = {};
+    for (const key of ['series', 'episode', 'notes']) if (val(key) !== baseline.get(key))
+      changes[key] = key === 'episode' ? (val(key) ? Number(val(key)) : null) : val(key);
+    for (const [i, p] of a.platforms.entries()) {
+      const fields = {};
+      for (const key of names) {
+        const name = `p${i}-${key}`;
+        if (resetting.has(i) && val(name) === p.original[key]) fields[key] = null;
+        else if (val(name) !== baseline.get(name) || resetting.has(i)) fields[key] = val(name);
+      }
+      if (Object.keys(fields).length) (changes.platforms ??= {})[p.id] = fields;
+    }
+    if (!Object.keys(changes).length) { status.textContent = '没有修改'; return; }
+    for (const control of controls) control.disabled = true;
+    status.textContent = '';
+    try {
+      const result = await fetch('/api/archive-notes?id=' + encodeURIComponent(id), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ revision: a.revision, changes }),
+      });
+      const value = await result.json();
+      if (!result.ok) throw new Error(value.error || '保存失败');
+      a = value;
+      form.closest('details').querySelector('[data-archive-metadata]').textContent = archiveNotesLabel(a);
+      for (const control of controls) if (control.name) baseline.set(control.name, control.value);
+      resetting.clear();
+      status.textContent = '已保存本地档案';
+    } catch (error) { status.textContent = error.message || '保存失败'; }
+    finally { for (const control of controls) control.disabled = false; }
+  });
+}
+
 async function vEpisode(id) {
   const e = await api('/api/episode?id=' + encodeURIComponent(id)), [t1, t2] = e.name.split(/[｜|]/).map(x => x.trim());
+  const a = await api('/api/archive-notes?id=' + encodeURIComponent(id)).catch(() => null);
   const todo = e.tasks.filter(t => ['awaiting_user', 'filled'].includes(t.state));
-  after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); };
+  after = () => { const el = $('#c-line'); if (el) drawLines(el, samplesOf(e)); bindArchiveNotes(id, a); };
   return `<a class="back" href="#/archive">‹ 档案</a>
   <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}&v=${e.coverVer || ''}" alt="">` : '<div></div>'}
     <div><div class="eyebrow">第 ${esc(e.episode)} 期</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
@@ -233,6 +301,7 @@ async function vEpisode(id) {
   ${e.reviews && e.reviews.length ? `${sec('复盘', '同龄对比：拿上一期发布后同样天数的数据比')}<div class="panel"><div class="tw"><table><thead><tr><th>发布后</th><th class="n">全平台播放</th><th class="n">互动率</th><th>上一期同龄</th><th class="n">对比</th><th class="n">期间涨粉</th>${O.siteOn && !O.siteSalesOnly ? '<th class="n">注册（按期）</th>' : ''}</tr></thead><tbody>
     ${e.reviews.map(r => `<tr><td><b>第 ${r.age} 天</b>${r.partial ? '<span style="color:var(--t3);font-size:12px;margin-left:6px">进行中</span>' : ''}</td><td class="n"><b>${fmt(r.views)}</b></td><td class="n">${pct(r.ints, r.views, 1)}</td><td>${r.prev ? `「${esc(r.prev.nick)}」${fmt(r.prev.views)}` : '<span style="color:var(--t3)">没有可比的上一期</span>'}</td><td class="n">${r.prev && r.prev.views ? (r.views >= r.prev.views ? `<b style="color:var(--good)">${(r.views / r.prev.views).toFixed(1)} 倍</b>` : `<b style="color:var(--crit)">${pct(r.views, r.prev.views, 0)}</b>`) : '–'}</td><td class="n">${r.fans ? (r.fans > 0 ? '+' : '') + fmt(r.fans) : '–'}</td>${O.siteOn && !O.siteSalesOnly ? `<td class="n">${r.conv ? fmt(r.conv.reg) : '–'}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>` : ''}
   ${sec('播放走势', '每次采样一个点')}<div class="panel"><div class="chartbox" id="c-line"></div></div>
+  ${a ? archiveNotesHTML(a) : ''}
   ${sec('当时发的文案', e.snapshotAt ? `存档于 ${when(e.snapshotAt)}` : '没有存档，显示的是工程目录里现在的内容')}
   <div class="panel">${PL.map(p => e.tasks.find(t => t.platform === p)).filter(Boolean).map(t => `<details><summary>${logo(t.platform)}<b>${esc(PN[t.platform] || t.name)}</b><span>${esc(t.copy.title || t.copy.body.slice(0, 50))}</span></summary>${t.copy.title ? `<div class="copy"><b>${esc(t.copy.title)}</b></div>` : ''}${t.copy.body ? `<div class="copy">${esc(t.copy.body)}</div>` : ''}${t.copy.tags.length ? `<div style="margin-top:8px;font-size:12.5px;color:var(--t3)">${t.copy.tags.map(x => '#' + esc(x)).join('  ')}</div>` : ''}${t.shot ? `<img class="shot" loading="lazy" src="/shot?id=${encodeURIComponent(e.id)}&p=${t.platform}" alt="提交前的页面截图">` : ''}</details>`).join('')}</div>
   ${sec('过程记录')}<div class="panel"><div class="mono">${e.logs.length ? e.logs.map(l => { let r = l.result || ''; try { const j = JSON.parse(r); r = [j.status, j.url, j.note].filter(Boolean).join('  '); } catch {} return `${when(l.ts)}  ${esc(PN[l.platform] || l.platform || '-')}  ${esc(l.action)}  ${esc(r)}`; }).join('\n') : '没有记录'}</div></div>`;
@@ -360,6 +429,41 @@ function platformRow(p) {
     ${canAct ? abtn({type:'toggle-platform', platform:p.id, on:p.disabled}, toggle, '', p.disabled ? '' : `停用${name}？`, toggle + name) : ''}</div>`;
 }
 
+const scheduleNames = { sales: '小鹅通销售与订单', daemon: '守护进程检查' };
+function scheduleText(rule) {
+  return rule.mode === 'daily' ? '每天 ' + rule.times.join('、') : '每 ' + rule.minutes + ' 分钟';
+}
+function schedulePanel() {
+  const saved = itg().schedules;
+  if (!saved) return '';
+  const keys = itg().site.salesOnly ? ['sales', 'daemon'] : ['daemon'];
+  if (!scheduleEditor) return `<dl class="schedule-summary">${keys.map(key => `<div><dt>${scheduleNames[key]}</dt><dd>${esc(scheduleText(saved[key]))}</dd></div>`).join('')}</dl>
+    <button type="button" class="btn" data-edit-schedules>修改时间</button>`;
+  return `<form id="schedule-form" aria-label="自动调度">
+    <div class="grid g2">${keys.map(key => {
+      const rule = scheduleEditor.fields[key], interval = rule.mode === 'interval';
+      return `<fieldset data-schedule="${key}" class="schedule-field"><legend>${scheduleNames[key]}</legend>
+        <label class="lab" for="${key}-mode">调度方式</label>
+        <select class="inp" id="${key}-mode" name="${key}Mode"><option value="interval" ${interval ? 'selected' : ''}>按间隔</option><option value="daily" ${interval ? '' : 'selected'}>每天定点</option></select>
+        <div data-schedule-interval ${interval ? '' : 'hidden'}><label class="lab" for="${key}-minutes">间隔（分钟）</label>
+          <input class="inp" type="number" inputmode="numeric" min="1" max="1440" step="1" required id="${key}-minutes" value="${esc(rule.minutes)}" ${interval ? '' : 'disabled'}></div>
+        <div data-schedule-daily ${interval ? 'hidden' : ''}><label class="lab" for="${key}-times">每天的时间（上海时间）</label>
+          <input class="inp" id="${key}-times" type="text" required placeholder="08:00, 18:30" aria-describedby="${key}-times-hint" value="${esc(rule.times)}" ${interval ? 'disabled' : ''}>
+          <small class="note" id="${key}-times-hint">使用 24 小时制，多个时间用逗号隔开。</small></div>
+        </fieldset>`;
+    }).join('')}</div>
+    <div class="settings-footer"><button class="btn pri" type="submit">保存时间</button><button class="btn" type="button" data-cancel-schedules>取消</button>
+    <span role="status" id="schedule-message"></span></div></form>`;
+}
+function paintSchedules() {
+  const panel = $('#schedule-panel');
+  if (panel) panel.innerHTML = schedulePanel();
+}
+function readScheduleField(row) {
+  const key = row.dataset.schedule;
+  return { mode: row.querySelector('select').value, minutes: row.querySelector('#' + key + '-minutes').value, times: row.querySelector('#' + key + '-times').value };
+}
+
 function vSystem() {
   const h = O.health, today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }), cur = O.episodes?.[0], ps = h.platforms || [];
   const dates = ps.filter(p => !p.disabled && p.day).map(p => p.day);
@@ -370,6 +474,7 @@ function vSystem() {
   <div class="panel"><div class="btns" style="margin-bottom:4px">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}</div>
     ${ps.map(platformRow).join('') || '<div class="empty">没有平台</div>'}</div>
   ${S ? `<details id="account-settings" class="panel settings-panel" ${settingsDirty ? 'open' : ''}><summary>B站账号设置</summary>${settingsHTML(S)}</details>` : ''}
+  ${itg().schedules ? `${sec('自动调度', '上海时间')}<div class="panel schedule-panel" id="schedule-panel">${schedulePanel()}</div>` : ''}
   ${sec('集成')}
   <div class="sys-2col sys-itg">
     <div class="panel">
@@ -389,7 +494,7 @@ function vSystem() {
   <div class="sys-2col">
     <div class="panel sys-tasks">
       <div class="ph"><h3>自动任务</h3></div>
-      <div class="sys-scroll"><dl class="kv"><dt>每 5 分钟</dt><dd>检查有没有到点要取链接的期数，提醒还没点发布的平台</dd>${Object.keys(h.login || {}).length ? '<dt>每小时</dt><dd>启用账号登录保活</dd>' : ''}<dt>每天 9 点后</dt><dd>体检一次，有平台掉线才通知（上次：${esc(h.doctorDay || '还没做')}）</dd><dt>每天 10 点后</dt><dd>采流量和粉丝，发飞书日报（上次：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时每 6 小时采一次流量</dd></dl></div>
+      <div class="sys-scroll"><dl class="kv"><dt>守护进程检查时</dt><dd>检查到期的发布链接，提醒等待确认的平台</dd>${Object.keys(h.login || {}).length ? '<dt>登录保活</dt><dd>保活间隔到期时检查已配置的账号</dd>' : ''}<dt>每日体检</dt><dd>每天 09:00 后的首轮检查执行（已处理到：${esc(h.doctorDay || '还没做')}）</dd><dt>流量日报</dt><dd>每天 10:00 后的首轮检查采流量和粉丝（已处理到：${esc(h.metricsDay || '还没采')}）</dd><dt>新一期发布后</dt><dd>头 72 小时内，采样间隔到期时采流量</dd></dl></div>
     </div>
     <div class="panel sys-feed">
       <div class="ph"><h3>最近动态</h3></div>
@@ -401,7 +506,8 @@ function vSystem() {
 async function render(forceSettingsRender = false) {
   captureSiteDraft(); captureFsDraft();
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
-  if (!O || (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender)) return;
+  const editingSystem = () => key === 'system' && !forceSettingsRender && ((settingsDirty && $('#settings-form')) || (scheduleEditor && $('#schedule-form')));
+  if (!O || editingSystem()) return;
   let body;
   try {
     if (key === 'system') {
@@ -413,7 +519,7 @@ async function render(forceSettingsRender = false) {
     body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)();
   } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
   if (h !== (location.hash || '#/traffic')) return;
-  if (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender) return;
+  if (editingSystem()) return;
   const visibleForm = $('#settings-form');
   if (key !== 'system' && settingsDirty && visibleForm) S = { ...S, ...readSettings(visibleForm) };
   const accountSettingsOpen = key === 'system' && $('#account-settings')?.open;
@@ -436,9 +542,35 @@ async function refreshAccountTraffic() {
   await render();
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
-document.addEventListener('input', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
+document.addEventListener('input', (e) => {
+  if (e.target.closest?.('#settings-form')) settingsDirty = true;
+  const row = e.target.closest?.('[data-schedule]');
+  if (row && scheduleEditor) scheduleEditor.fields[row.dataset.schedule] = readScheduleField(row);
+});
 document.addEventListener('change', (e) => { if (e.target.closest?.('#settings-form')) settingsDirty = true; });
 document.addEventListener('submit', async (e) => {
+  if (e.target.id === 'schedule-form') {
+    e.preventDefault();
+    const form = e.target;
+    if (!scheduleEditor || form.inert) return;
+    const schedules = { ...scheduleEditor.original };
+    for (const row of form.querySelectorAll('[data-schedule]')) {
+      const field = readScheduleField(row);
+      schedules[row.dataset.schedule] = field.mode === 'interval' ? { mode: 'interval', minutes: Number(field.minutes) }
+        : { mode: 'daily', times: field.times.trim().split(/[,，、\s]+/).filter(Boolean) };
+    }
+    form.inert = true;
+    try {
+      const saved = await postJson('/api/schedules', { schedules, expectedSchedules: scheduleEditor.original });
+      if (I) I.schedules = saved;
+      scheduleEditor = null;
+      paintSchedules();
+      $('[data-edit-schedules]')?.focus();
+      toast('已保存调度时间');
+    } catch (err) { form.querySelector('[role="status"]').textContent = err.message; }
+    finally { form.inert = false; }
+    return;
+  }
   if (e.target.id !== 'settings-form') return; e.preventDefault();
   const form = e.target, button = form.querySelector('[type="submit"]'), status = $('#settings-message'); button.disabled = true;
   try {
@@ -450,6 +582,29 @@ document.addEventListener('submit', async (e) => {
   finally { button.disabled = false; }
 });
 document.addEventListener('click', async (e) => {
+  const editSchedule = e.target.closest('[data-edit-schedules]');
+  if (editSchedule) {
+    editSchedule.disabled = true;
+    try {
+      const saved = await api('/api/schedules');
+      I.schedules = saved;
+      const fields = {};
+      for (const [key, rule] of Object.entries(saved)) {
+        fields[key] = { mode: rule.mode, minutes: String(rule.minutes ?? 60), times: (rule.times || []).join(', ') };
+      }
+      scheduleEditor = { original: saved, fields };
+      paintSchedules();
+      $('#schedule-form select')?.focus();
+    } catch (err) { toast(err.message); }
+    finally { editSchedule.disabled = false; }
+    return;
+  }
+  if (e.target.closest('[data-cancel-schedules]')) {
+    scheduleEditor = null;
+    paintSchedules();
+    $('[data-edit-schedules]')?.focus();
+    return;
+  }
   const ab = e.target.closest('[data-account-action]');
   if (ab) {
     ab.disabled = true;
@@ -519,6 +674,16 @@ document.addEventListener('click', async (e) => {
   finally { b.disabled = false; }
 });
 document.addEventListener('change', async (e) => {
+  const row = e.target.closest?.('[data-schedule]');
+  if (scheduleEditor && row && e.target.tagName === 'SELECT') {
+    const interval = e.target.value === 'interval';
+    row.querySelector('[data-schedule-interval]').hidden = !interval;
+    row.querySelector('[data-schedule-daily]').hidden = interval;
+    row.querySelector('input[type="number"]').disabled = !interval;
+    row.querySelector('input[type="text"]').disabled = interval;
+    scheduleEditor.fields[row.dataset.schedule] = readScheduleField(row);
+    return;
+  }
   if (!I || !['fs-login', 'site-on'].includes(e.target.id)) return;
   if (e.target.id === 'fs-login') {
     e.target.disabled = true;

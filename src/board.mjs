@@ -3,7 +3,8 @@ import fs from 'node:fs'; import path from 'node:path'; import { execFile } from
 import { db, NAMES, STATE_CN, episodes, getTasks, setMeta, getMeta } from './db.mjs';
 import { config, CFG } from './feishu.mjs';
 import { evaluate, withTab } from './driver.mjs';
-import { SITE } from './site.mjs';
+import { SITE, matchesSiteData } from './site.mjs';
+import { runIfDue } from './schedule-runtime.mjs';
 import { randomUUID } from 'node:crypto';
 import { saveXiaoeLive } from './xiaoe-live.mjs';
 import { fetchXiaoeSnapshot, saveXiaoeDays } from './xiaoe.mjs';
@@ -103,18 +104,27 @@ export async function fetchSite({ history = true } = {}) {
   return { days, channels: d.ch || [] };
 }
 
-// 实时销售复用守护循环，十分钟至多读取一次；失败也等待下个间隔，避免密集重试。
-export async function syncSalesIfDue(now = Date.now()) {
+// 定时只在上海日期变更后补历史，每轮都取当日销售和近期订单。
+export async function syncScheduledSales() {
   if (!SITE?.salesOnly) return null;
-  const last = Math.max(Date.parse(getMeta('siteLiveSyncedAt') || '') || 0, Number(getMeta('siteSalesAttempt')) || 0);
-  if (now - last < 10 * 60000) return null;
-  setMeta('siteSalesAttempt', now);
-  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now());
   return fetchSite({ history: getMeta('siteHistoryDay') !== day });
 }
 
-export async function boardSync({ site = true } = {}) {
-  const localSales = site && SITE?.salesOnly ? await fetchSite() : null;
+export async function syncSalesIfDue(now = Date.now()) {
+  return SITE?.salesOnly ? runIfDue('sales', syncScheduledSales, now) : null;
+}
+
+function cachedShopSales() {
+  const rows = matchesSiteData(getMeta('siteShopName'))
+    ? db.prepare("SELECT day, reg, vip, orders, revenue FROM site_daily WHERE day BETWEEN date('now','+8 hours','-30 days') AND date('now','+8 hours') ORDER BY day").all()
+    : [];
+  return { days: Object.fromEntries(rows.map(r => [r.day, r])), channels: [] };
+}
+
+export async function boardSync({ site = true, cachedSales = false } = {}) {
+  if (site && SITE?.salesOnly && cachedSales && !B) return null;
+  const localSales = site && SITE?.salesOnly ? (cachedSales ? cachedShopSales() : await fetchSite()) : null;
   if (!B) {
     if (!localSales) return null;
     const dates = Object.keys(localSales.days).sort();

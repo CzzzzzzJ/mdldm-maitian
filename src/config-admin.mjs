@@ -2,6 +2,8 @@
 // 另外提供独立的 B 站采集账号配置接口，不改发布设置。
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { normalizeSchedules, notifyScheduleChange } from './schedules.mjs';
 import { accountsOf } from './targets.mjs';
 import { config, CFG } from './feishu.mjs';
 import * as drv from './driver.mjs';
@@ -79,23 +81,44 @@ export function replaceBilibiliAccounts(cfg, body) {
   return next;
 }
 
-export function saveBilibiliAccounts(body) {
+function updateSettings(change, backup = false) {
   // 在写入前读取磁盘，保留所有其他设置；同步写入和换名避免同一进程
   // 的并发请求交错，也避免写入失败留下半个 JSON。
   const cfgPath = fs.realpathSync(CFG);
   const disk = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  const next = replaceBilibiliAccounts(disk, body);
-  const updated = { ...disk, bilibiliAccounts: next };
-  const tmpDir = fs.mkdtempSync(path.join(path.dirname(cfgPath), '.bilibili-accounts-'));
+  const patch = change(disk);
+  const updated = { ...disk, ...patch };
+  const tmpDir = fs.mkdtempSync(path.join(path.dirname(cfgPath), '.maitian-settings-'));
   const tmpFile = path.join(tmpDir, 'config.json');
   try {
     fs.writeFileSync(tmpFile, JSON.stringify(updated, null, 2) + '\n', { mode: fs.statSync(cfgPath).mode & 0o777 });
+    if (backup) fs.copyFileSync(cfgPath, cfgPath + '.bak');
     fs.renameSync(tmpFile, cfgPath);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-  config.bilibiliAccounts = next;
+  Object.assign(config, patch);
+  return updated;
+}
+
+export function saveBilibiliAccounts(body) {
+  const updated = updateSettings(disk => ({ bilibiliAccounts: replaceBilibiliAccounts(disk, body) }));
   return { bilibiliAccounts: bilibiliAccountView(updated) };
+}
+
+export function saveSchedules(body) {
+  if (!isObject(body?.schedules)) throw Object.assign(new Error('请填写自动调度时间'), { status: 400 });
+  let next;
+  try { next = normalizeSchedules(body.schedules); }
+  catch (err) { throw Object.assign(err, { status: 400 }); }
+  updateSettings(disk => {
+    if (body.expectedSchedules !== undefined && !isDeepStrictEqual(normalizeSchedules(disk.schedules), body.expectedSchedules)) {
+      throw Object.assign(new Error('调度时间已变化，请取消后重新修改'), { status: 409 });
+    }
+    return { schedules: next };
+  }, true);
+  notifyScheduleChange();
+  return next;
 }
 
 // ---------- 测试（只读，用调用方给的字段，不写库） ----------

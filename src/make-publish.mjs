@@ -10,6 +10,7 @@
 //   ## 七、YouTube   **标题：** / **简介：** / **标签：**（逗号分隔）
 //   ## 八、X         整节就是推文
 //   ## 九、Instagram 整节就是配文（链接点不了，话题标签写在末尾）
+//   ## 十一、Threads  整节就是帖子（≤500 字；「> 」开头的说明行会去掉；可选一行「**话题：** xxx」，只能 1 个）
 // 工程目录里：成片.mp4、封面/cover-3x4.png、cover-4x3.png、cover-16x9.jpg（有哪个用哪个）
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, basename, dirname, sep } from 'node:path';
@@ -85,6 +86,10 @@ if ((s = sec('X'))) {
 }
 
 if ((s = sec('Instagram'))) platforms.instagram = { covers: pick('16x9', '4x3').slice(0, 1), ...(files.includes('成片-ig.mp4') ? { video: '成片-ig.mp4' } : {}), caption: clean(s.split('\n').filter(l => !/^>/.test(l)).join('\n')) };
+if ((s = sec('Threads'))) {
+  const t = s.match(/^\*\*话题：\*\*[ \t]*(.+)$/m);
+  platforms.threads = { covers: [], text: clean(s.replace(t ? t[0] : '', '').split('\n').filter(l => !/^>/.test(l)).join('\n')), ...(t ? { topic: t[1].trim().replace(/^#/, '') } : {}) };
+}
 
 // 成片时长（秒）：有 ffprobe 就读出来，给需要时长的平台用
 let durationSec;

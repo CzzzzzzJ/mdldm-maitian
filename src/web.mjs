@@ -3,11 +3,13 @@ import http from 'node:http'; import crypto from 'node:crypto'; import fs from '
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
 import { SITE, siteOn, refreshSite, matchesSiteData } from './site.mjs';
-import { applyFeishuPatch, applySitePatch, saveConfig, testSite } from './config-admin.mjs';
+import { applyFeishuPatch, applySitePatch, saveConfig, saveSchedules, testSite } from './config-admin.mjs';
+import { normalizeSchedules, notifyScheduleChange } from './schedules.mjs';
 import { learnOn, learnUrl } from './learn.mjs';
 import { buildSalesSummary, salesDateRange } from './sales.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
+import { readArchiveNotes, saveArchiveNotes } from './archive-notes.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
@@ -19,7 +21,7 @@ const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
-const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('kuaishou') ? ['kuaishou'] : []), ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里；快手、公众号只有 batches 里写了才出现
+const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'threads', ...(config.batches?.flat().includes('kuaishou') ? ['kuaishou'] : []), ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里；快手、公众号只有 batches 里写了才出现
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 const platformList = () => PLATFORMS.filter(id => id !== 'zsz' || !SITE?.salesOnly).map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
 
@@ -96,7 +98,7 @@ function widgetScript(req, file) {
 const latestPublished = () => episodes().filter(e => e.schedule && Date.parse(e.schedule) <= Date.now()).sort((a, b) => Date.parse(b.schedule) - Date.parse(a.schedule))[0];
 // 手机小组件：只读汇总（粉丝、涨幅、最新一期播放、站点近 7 天），用单独的 config.web.widgetToken，只能读这一个接口
 function widgetData() {
-  const ORDER = ['bilibili', 'douyin', 'xhs', 'channels', 'kuaishou', 'youtube', 'x', 'instagram'];
+  const ORDER = ['bilibili', 'douyin', 'xhs', 'channels', 'kuaishou', 'youtube', 'x', 'instagram', 'threads'];
   const rows = db.prepare("SELECT day, platform, total FROM followers WHERE day >= date('now','localtime','-40 day') AND total IS NOT NULL ORDER BY day").all();
   const by = {}; for (const r of rows) (by[r.platform] ||= []).push(r);
   const today = new Date().toLocaleDateString('sv-SE');
@@ -145,6 +147,10 @@ function thumb(f, w) {
 
 // ---------- 集成管理（飞书 / 知识站） ----------
 const metaJson = (k) => { const v = getMeta(k); if (!v) return null; try { return JSON.parse(v); } catch { return null; } };
+function savedSchedules() {
+  const disk = JSON.parse(fs.readFileSync(CFG, 'utf8'));
+  return normalizeSchedules(disk.schedules);
+}
 function integrations() {
   const cs = config.site || {};
   const summary = SITE && !SITE.salesOnly && matchesSiteData(getMeta('siteShopName')) ? (() => {
@@ -161,7 +167,7 @@ function integrations() {
     },
   };
 }
-const readJson = (req) => new Promise((res, rej) => { let b = ''; req.on('data', (d) => { b += d; if (b.length > 20000) req.destroy(); }); req.on('end', () => { try { res(JSON.parse(b || '{}')); } catch { res({}); } }); req.on('error', rej); });
+const readJson = (req, limit = 20000) => new Promise((res, rej) => { let b = ''; req.on('data', (d) => { b += d; if (b.length > limit) req.destroy(); }); req.on('end', () => { try { res(JSON.parse(b || '{}')); } catch { res({}); } }); req.on('error', rej); });
 const snapConfig = () => JSON.parse(JSON.stringify(config));
 const rollbackConfig = (backup) => { for (const k of Object.keys(config)) delete config[k]; Object.assign(config, backup); };
 
@@ -189,6 +195,23 @@ async function handle(req, res) {
     if (u.searchParams.get('key') === W.key) return send(res, 302, '', 'text/plain', { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, location: '/' });
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
+  }
+  const scheduleRoute = u.pathname === '/api/schedules';
+  const integrationsView = u.pathname === '/api/integrations' && req.method === 'GET';
+  let settingsAccess = true;
+  if (!W.key && (scheduleRoute || integrationsView)) {
+    settingsAccess = (LOGIN && sessionOk(req)) || !!(await accessEmail(req, W.access));
+    if (scheduleRoute && !settingsAccess) return send(res, 401, { error: '请配置网页口令并登录' });
+  }
+  if (scheduleRoute) {
+    if (req.method === 'GET') return send(res, 200, savedSchedules());
+    if (req.method !== 'POST') return send(res, 405, { error: '请求方法不支持' }, undefined, { allow: 'GET, POST' });
+    const origin = req.headers.origin;
+    const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+    if (req.headers['sec-fetch-site'] === 'cross-site' || (origin && origin !== protocol + '://' + req.headers.host)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, { error: '请发送 JSON' });
+    try { return send(res, 200, saveSchedules(await readJson(req, 65536))); }
+    catch (e) { return send(res, e.status || 500, { error: e.status ? e.message : '保存调度时间失败' }); }
   }
   if (u.pathname === '/api/bilibili-accounts') {
     const { bilibiliAccountView, saveBilibiliAccounts, InvalidBilibiliAccounts } = await import('./config-admin.mjs');
@@ -227,6 +250,37 @@ async function handle(req, res) {
       feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', platforms: platformList() }, now: new Date().toISOString() });
   }
   if (u.pathname === '/site-logo') { const f = SITE && config.site.logo && path.resolve(ROOT, config.site.logo); return f && fs.existsSync(f) ? send(res, 200, fs.readFileSync(f), /\.svg$/.test(f) ? 'image/svg+xml' : /\.jpe?g$/.test(f) ? 'image/jpeg' : 'image/png', { 'cache-control': 'max-age=3600' }) : send(res, 404, ''); }
+  if (u.pathname === '/api/archive-notes') {
+    if (!W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access)))
+      return send(res, 401, { error: '开启登录或访问口令后才能编辑本地档案' });
+    const id = u.searchParams.get('id');
+    if (!id) return send(res, 400, { error: '缺少档案编号' });
+    try {
+      if (req.method === 'GET') return send(res, 200, readArchiveNotes(id));
+      if (req.method !== 'POST') return send(res, 405, { error: '不支持的请求方法' }, undefined, { allow: 'GET, POST' });
+      const origin = req.headers.origin;
+      const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+      if (['cross-site', 'same-site'].includes(req.headers['sec-fetch-site']) || (origin && origin !== `${protocol}://${req.headers.host}`))
+        return send(res, 403, { error: '不接受其他网站发起的操作' });
+      if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || ''))
+        return send(res, 415, { error: '只接受 JSON 请求' });
+      const buffers = [];
+      let length = 0;
+      for await (const chunk of req) {
+        length += chunk.length;
+        if (length > 64 * 1024) { buffers.length = 0; continue; }
+        buffers.push(chunk);
+      }
+      if (length > 64 * 1024) return send(res, 413, { error: '请求太大' });
+      let body;
+      try { body = JSON.parse(Buffer.concat(buffers).toString('utf8')); }
+      catch { return send(res, 400, { error: '请求格式不对' }); }
+      return send(res, 200, saveArchiveNotes(id, body));
+    } catch (err) {
+      const status = [400, 404, 409].includes(err.status) ? err.status : 500;
+      return send(res, status, { error: status === 500 ? '无法读取或保存档案' : err.message });
+    }
+  }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
   if (u.pathname === '/cover' || u.pathname === '/shot') {
     const ep = getEpisode(u.searchParams.get('id')); if (!ep) return send(res, 404, '');
@@ -274,7 +328,7 @@ async function handle(req, res) {
     child.on('close', code => finish(code === 0));
     return send(res, 200, { ok: true });
   }
-  if (u.pathname === '/api/integrations' && req.method === 'GET') return send(res, 200, integrations());
+  if (integrationsView) return send(res, 200, { ...integrations(), ...(settingsAccess && { schedules: savedSchedules() }) });
   if (u.pathname === '/api/integrations/feishu' && req.method === 'POST') {
     const a = await readJson(req), backup = snapConfig();
     try { applyFeishuPatch(config, { webhook: String(a.webhook ?? ''), login: a.login === true }); saveConfig(config); }
@@ -293,6 +347,7 @@ async function handle(req, res) {
       return send(res, /先填站点地址/.test(msg) ? 400 : 500, { error: /先填站点地址/.test(msg) ? msg : ('写配置失败：' + msg) });
     }
     refreshSite();
+    notifyScheduleChange();
     return send(res, 200, { site: integrations().site });
   }
   if (u.pathname === '/api/integrations/feishu/test' && req.method === 'POST') {
