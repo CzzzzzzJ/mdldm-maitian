@@ -75,13 +75,29 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/m
 
 下载麦田和发布助手到 `~/maitian/`、接上发布 skill、打开安装向导；向导问完几个问题，生成配置、装好开机自启、打开各平台登录页。需要 macOS、Node.js ≥ 22.5、Google Chrome。
 
-Windows（社区贡献，感谢 [ajin558](https://github.com/ajin558)；开机自启暂未适配）：
+Windows（社区贡献，感谢 [ajin558](https://github.com/ajin558)）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/CzzzzzzJ/mdldm-maitian/main/scripts/install-windows.ps1 | iex"
 ```
 
-同样下载到 `%USERPROFILE%\maitian\`、接上发布 skill、打开安装向导，安装目录里另有 4 个双击启动器（演示 / 登录 / 体检 / 启动）。需要 Windows 10/11、Node.js ≥ 22.5、Google Chrome；缺 Git / Node 时脚本会用 winget 自动补装。开机自启暂未适配（向导里的 launchd 步骤会自动跳过），可用任务计划程序指向安装目录的 `4-start.bat` 代替。
+同样下载到 `%USERPROFILE%\maitian\`、接上发布 skill、打开安装向导，安装目录里另有 4 个双击启动器（演示 / 登录 / 体检 / 启动）。需要 Windows 10/11、Node.js ≥ 22.5、Google Chrome。缺 Git 或 Node 时，脚本会用 winget 补装。
+
+在安装向导选「启用 Windows 登录自启，并现在启动麦田」后，麦田会在本次安装结束时启动，以后每次用当前 Windows 账号登录时也会启动。如果大屏端口已有进程监听，安装会跳过本次启动。可以在任务计划程序里找到 `MaitianDaemon-` 开头的任务，查看状态或手动运行。计划任务未运行时，也可以双击安装目录里的 `4-start.bat` 手动启动。
+
+已有 `config.json` 的用户可以保留原配置，在 `mdldm-maitian` 仓库目录打开 PowerShell，运行下方对应命令。
+
+```powershell
+# 启用登录自启，并立即启动
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-autostart.ps1 -StartNow
+
+# 关闭登录自启，也会停止正在运行的计划任务
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows-autostart.ps1 -Uninstall
+```
+
+计划任务在守护进程异常退出后每隔 1 分钟尝试重启，最多 3 次。运行输出追加到仓库内的 `data/daemon.log`。安装后大屏迟迟打不开时，可查看这份日志和任务计划程序里的任务状态。
+
+计划任务使用注册时的 `node.exe` 路径。用 nvm 等工具更换 Node.js 后，如果可执行文件路径变了，请在能找到新 `node.exe` 的 PowerShell 里重跑上面的启用命令，更新现有任务。
 
 <p align="center"><img src="https://github.com/CzzzzzzJ/mdldm-maitian/releases/download/media/maitian-install.gif" width="720" alt="一行安装演示" /></p>
 
@@ -112,7 +128,7 @@ node src/hub.mjs doctor                 # 登录完检查各平台登录态和�
 
 - **播种（发布）**：读 NAS 上的一期发布工程（成片、封面、各平台文案、定时），按批次在专用 Chrome 里填好各平台上传页。
   - X、YouTube、Instagram、自有站点：回读文案和定时一致后自动提交，只点一次。
-  - B站、抖音、小红书、视频号：**填好就停**，等你自己点「发布 / 定时发布」，守护进程每 20 分钟提醒。
+  - B站、抖音、小红书、视频号：**填好就停**，等你自己点「发布 / 定时发布」，守护进程巡检时提醒，同一期的提醒至少间隔 20 分钟。
   - 防重：库里已经到位的平台不再跑；X 定时列表、YouTube Studio、Instagram 主页、站点后台已有同名的不再传。
 - **长势（流量和粉丝）**：每天上午采一次各期在各平台的播放和互动、各平台粉丝数；新一期头三天每 6 小时采一次。「账号作品」能单独查看 B站、抖音、小红书现有作品，不用登记发布工程。点「采集账号流量」或运行 `node src/hub.mjs metrics-accounts`；直连模式会自动启动专用 Chrome，首次需先登录。可在 `config.json` 中设置 `"accountTrafficAuto": true`，随每天的流量日报采集。失败时保留上次成功数据。
   - B站副号可在 `bilibiliAccounts` 配置（例如 `[{ "id": "second", "name": "副号" }]`）。副号需要 `direct` 模式并使用独立的调试端口和 Chrome 登录目录（默认按 ID 分配，亦可显式设置 `chromePort`、`chromeProfile`）。可填 `uid` 防止登错号；首次成功采集后也会校验历史归属。副号不参与发布。
@@ -122,6 +138,12 @@ node src/hub.mjs doctor                 # 登录完检查各平台登录态和�
 - **复盘（数据分析）**：每期发布后第 1/3/7 天自动出复盘卡片：各平台占比、互动率、和上一期同龄对比（第 N 天对第 N 天）、期间涨粉、带来的注册；每周一出周报。网页单期页有同一份复盘表，转化页有每期转化漏斗（播放 → 注册 → 会员 → 收入）。
 - **飞书通知**：开跑、每个平台到位、异常、等你点发布、定时被平台改掉、每日日报、复盘和周报，都是带颜色的卡片。webhook 和「飞书验证码登录」开关可以在网页「系统 → 集成」里编辑、测试，保存即生效。
 - **平台管理**：网页「系统 → 平台」列出每个平台的登录状态（体检结果），掉线了点「去登录」只打开这一家的后台，在跑麦田的那台 Mac 上用专用 Chrome 扫码；「全部检查」就是一次体检。不用的平台可以停用（不体检、不发布、不采粉丝），会写进 `config.json` 的 `disabled`。B站每个账号各有一行，可单独检查登录、打开后台或暂停该账号的检查与作品采集。「管理B站账号」可以添加、改名或移除账号。用相同 UID 重新添加可恢复原账号与历史数据。「停用整个B站」同时暂停 B站发布和采集，再次启用时保留各账号的开关。
+
+### 本地档案审核
+
+在「档案」打开一期后，在「查看或编辑本地档案」可填写视频系列、期数及审核备注，或保存修改后的本地文案。使用时须设置网页访问口令或启用登录。没有填写系列或期数的历史记录仍可使用；原始文案保留在原来的档案栏目。
+
+这些修改只存到本地档案，不会改写发布工程和原始存档，也不会更新任何平台上的作品。「恢复原文案」清除该平台的本地修改，点击保存后生效。
 
 ## 各平台的坑（实战总结）
 
@@ -186,6 +208,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 | `rootPath` / `nasUrl` | 发布工程根目录；NAS 掉线或被挂到「…-1」时守护进程会自己卸掉重挂 |
 | `batches` | 上传批次。一次传太多平台会互相抢带宽导致超时，建议国内两两一批 |
 | `auto` / `manual` | 自动提交 / 等你点发布的平台 |
+| `schedules.sales` / `schedules.daemon` | 小鹅通同步和守护巡检各自默认每 60 分钟运行。在「系统 → 自动调度」分别选择间隔分钟数或每日的北京时间，保存后生效；发布前登录检查与计划发现不受例行巡检时间限制 |
 | `keepAlive` | 容易掉登录的平台（视频号），定时刷一下保活 |
 | `disabled` | 停用的平台（如 `["instagram"]`）：不体检、不打开登录页、不发布、不采粉丝。网页「系统 → 平台」里也能开关 |
 | `bilibiliAccounts` | 可选的 B 站采集账号配置；这项配置不改变发布账号或发布流程 |
@@ -224,7 +247,7 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 }
 ```
 
-运行 `node src/hub.mjs login --only zsz`，在麦田专用 Chrome 中登录并进入店铺。运行 `node src/hub.mjs board` 首次同步，随后可在大屏和「销售」查看当天、近 7 天、近 30 天的支付、退款、订单及最近 10 笔订单。守护进程每 10 分钟更新一次，按北京时间每日补齐最近 30 个完整自然日。订单仅保存编号、商品、金额、状态和下单时间。销售模式下，小鹅通不参与课程发布。
+运行 `node src/hub.mjs login --only zsz`，在麦田专用 Chrome 中登录并进入店铺。运行 `node src/hub.mjs board` 首次同步，随后可在大屏和「销售」查看当天、近 7 天、近 30 天的支付、退款、订单及最近 10 笔订单。默认每 60 分钟更新当日销售和最近订单。每天第一次成功同步时，按北京时间补齐最近 30 个完整自然日。要提前查看最新订单，可在「系统 → 收入来源」手动同步。订单仅保存编号、商品、金额、状态和下单时间。销售模式下，小鹅通不参与课程发布。
 
 已结束日期的退款来自每日统计。需要当天退款时，可在 `site.refundQuery` 中填写当前店铺后台「退款趋势图」查询的 JSON 请求体（只需请求体，无需请求头或 Cookie）。同步时会自动替换日期，按「退款金额」字段取值。缺少当天报表或数据时，退款和支付净额显示为「–」。每个销售数据库绑定一家店铺，换店时请使用单独的 `MAITIAN_DB` 数据库路径。
 
@@ -282,11 +305,11 @@ iPhone 桌面 / 锁屏常驻显示全平台粉丝、今日涨粉、最新一期�
 
 ### 交流群
 
-想一起聊麦田、多平台运营的，微信扫码进群（1–5 群已满，现在开的是 6 群）：
+想一起聊麦田、多平台运营的，微信扫码进群（1–6 群已满，现在开的是 7 群）：
 
-<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 6 群" /></p>
+<p align="center"><img src="docs/readme/qr-group.jpg" width="260" alt="微信群：麦当 mdldm 的麦田 7 群" /></p>
 
-> 微信群码 7 天有效（这张 11 月 27 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
+> 微信群码 7 天有效（这张 12 月 4 日前可扫），我会定期换；扫不进去就提个 Issue 喊我一声。
 
 觉得有用就点个 ⭐ Star，这是我继续改下去的动力；遇到问题直接提 [Issue](https://github.com/CzzzzzzJ/mdldm-maitian/issues)。
 

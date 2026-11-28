@@ -52,7 +52,7 @@ node src/hub.mjs doctor --target 'bilibili@second' --quiet   # 副号 ID 为 sec
 
 ## 架构
 
-`src/hub.mjs` 是 CLI 和守护进程。`daemon` 每 5 分钟醒一次：扫发布计划、提醒还没点发布的平台、到点 `sync` 取链接、头三天按 `sampleHours`（默认 6 小时）加密采样、每天 10 点后采近 30 天流量并出第 1/3/7 天复盘、`keepAlive` 平台保活、小鹅通销售同步。网页由守护进程拉起（`HUB_NO_WEB=1` 可关），默认 `http://localhost:8787/?key=<web.key>`。
+`src/hub.mjs` 是 CLI 和守护进程。`daemon` 默认每 60 分钟巡检一次：扫发布计划、提醒还没点发布的平台、到点 `sync` 取链接、头三天按 `sampleHours`（默认 6 小时）加密采样、每天 10 点后采近 30 天流量并出第 1/3/7 天复盘、`keepAlive` 平台保活。小鹅通销售和最近订单另按独立计划同步，默认每 60 分钟一次。「系统 → 自动调度」可分别设置巡检和销售同步的间隔，或指定每日的北京时间。网页由守护进程拉起（`HUB_NO_WEB=1` 可关），默认 `http://localhost:8787/?key=<web.key>`。
 
 状态在 SQLite（`node:sqlite`），默认 `data/hub.db`，可用 `MAITIAN_DB` 换路径。表在 `src/db.mjs`：`episodes` / `tasks`（平台状态机）/ `metrics` + `samples` / `snapshots`（发布时的 `publish.json`）/ `logs` / `meta`，以及站点转化、小鹅通订单、账号作品流量。已到位状态 `LOCKED`（`filled`、`awaiting_user`、`scheduled`、`published`）不允许再跑，这是防重。`config.disabled` 里的平台不登录、不体检、不发布、不采粉丝；`src/web.mjs` 改的是同一个 `config` 对象，守护进程不用重启。
 

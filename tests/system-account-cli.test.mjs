@@ -24,7 +24,12 @@ function fixture(t) {
   const settings = path.join(dir, 'config.json'), trace = path.join(dir, 'trace'), database = path.join(dir, 'hub.db');
   fs.writeFileSync(path.join(src, 'bridge.mjs'), `
     export async function sleep(ms) {
-      if (ms === 300000 && process.env.SYSTEM_ONE_TICK === '1') process.exit(0);
+      if (ms === 300000 && process.env.SYSTEM_ONE_TICK === '1') {
+        // The publication and preflight loops run concurrently. Drain mock I/O
+        // microtasks before ending the fixture at its first clock tick.
+        await new Promise(resolve => setImmediate(resolve));
+        process.exit(0);
+      }
     }
   `);
   fs.writeFileSync(path.join(src, 'chrome-shim.mjs'), `
@@ -183,6 +188,8 @@ function eveningFixture(t) {
     mock.timers.enable({apis:['Date'], now:Date.parse('2026-11-24T21:00:00+08:00')});
   `);
   const env = {TZ:'Asia/Shanghai', NODE_OPTIONS:'--import=./clock.mjs', HUB_NO_WEB:'1', SYSTEM_ONE_TICK:'1'};
+  // Ensure the evening check works even outside the configured routine sweep.
+  f.config.schedules = { daemon: { mode:'daily', times:['07:30'] } };
   const sql = fn => {
     const db = new DatabaseSync(f.database);
     try { return fn(db); } finally { db.close(); }
@@ -279,7 +286,7 @@ test('evening sends no success notification when the only planned platform has s
   f.config.disabled.push('bilibili');
   const eve = f.evening();
   assert.deepEqual(eve.events, []);
-  assert.doesNotMatch(eve.stdout, /明天 .* 发布/);
+  assert.doesNotMatch(eve.stdout, /🌙/);
   // Allow the check to run if the platform is re-enabled during the same evening.
   assert.equal(f.sql(db => db.prepare("SELECT value FROM meta WHERE key='eve:eve'").get()), undefined);
 });

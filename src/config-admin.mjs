@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { normalizeSchedules, notifyScheduleChange } from './schedules.mjs';
 import { accountsOf } from './targets.mjs';
 import { config, CFG } from './feishu.mjs';
 import * as drv from './driver.mjs';
@@ -105,18 +106,24 @@ export function replaceBilibiliAccounts(cfg, body, bindings = new Map()) {
   return next;
 }
 
-// Read the current file and atomically replace only the settings being edited.
 function updateSettings(change, backup = false) {
-  const file = fs.realpathSync(CFG);
-  const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // 在写入前读取磁盘，保留所有其他设置；同步写入和换名避免同一进程
+  // 的并发请求交错，也避免写入失败留下半个 JSON。
+  const cfgPath = fs.realpathSync(CFG);
+  const disk = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
   const patch = change(disk);
-  const temp = path.join(path.dirname(file), '.platform-settings-' + randomUUID());
+  const updated = { ...disk, ...patch };
+  const tmpDir = fs.mkdtempSync(path.join(path.dirname(cfgPath), '.maitian-settings-'));
+  const tmpFile = path.join(tmpDir, 'config.json');
   try {
-    fs.writeFileSync(temp, JSON.stringify({ ...disk, ...patch }, null, 2) + '\n', { mode: fs.statSync(file).mode & 0o777, flag: 'wx' });
-    if (backup) fs.copyFileSync(file, file + '.bak');
-    fs.renameSync(temp, file);
-  } finally { fs.rmSync(temp, { force: true }); }
+    fs.writeFileSync(tmpFile, JSON.stringify(updated, null, 2) + '\n', { mode: fs.statSync(cfgPath).mode & 0o777 });
+    if (backup) fs.copyFileSync(cfgPath, cfgPath + '.bak');
+    fs.renameSync(tmpFile, cfgPath);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
   Object.assign(config, patch);
+  return updated;
 }
 
 export function saveBilibiliAccounts(body, db) {
@@ -144,6 +151,21 @@ export function setPlatformEnabled(platform, on, platforms, accountId) {
     return { bilibiliAccounts: next };
   }, true);
   return { ok: true, disabled: config.disabled || [] };
+}
+
+export function saveSchedules(body) {
+  if (!isObject(body?.schedules)) throw Object.assign(new Error('请填写自动调度时间'), { status: 400 });
+  let next;
+  try { next = normalizeSchedules(body.schedules); }
+  catch (err) { throw Object.assign(err, { status: 400 }); }
+  updateSettings(disk => {
+    if (body.expectedSchedules !== undefined && !isDeepStrictEqual(normalizeSchedules(disk.schedules), body.expectedSchedules)) {
+      throw Object.assign(new Error('调度时间已变化，请取消后重新修改'), { status: 409 });
+    }
+    return { schedules: next };
+  }, true);
+  notifyScheduleChange();
+  return next;
 }
 
 // ---------- 测试（只读，用调用方给的字段，不写库） ----------
