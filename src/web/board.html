@@ -355,9 +355,9 @@ function loginLight(h) {
 }
 function render() {
   const eps = O.episodes, days = O.site.days, h = O.health, now = Date.now();
-  // 停用的平台、未启用的知识站都不在大屏显示
+  // 停用的平台、未启用的可选平台（快手/公众号）、未启用的知识站都不在大屏显示
   const off = new Set((h.platforms || []).filter(p => p.disabled).map(p => p.id));
-  if (!(h.platforms || []).some(p => p.id === 'wechat')) off.add('wechat');
+  for (const p of ['wechat', 'kuaishou']) if (!(h.platforms || []).some(x => x.id === p)) off.add(p);
   PL = PL_ALL.filter(p => !off.has(p) && ((O.siteOn && !O.siteSalesOnly) || p !== 'zsz')); FANP = FANP_ALL.filter(p => !off.has(p));
   if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; }
   F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total;
