@@ -130,7 +130,7 @@ export async function igScheduled(caption, scheduleIso) {
 // Instagram：先看定时内容，再看自己主页 Reels 列表（逐条打开最近几条，配文第一行对得上就算）
 export async function igExisting(caption, scheduleIso) {
   const head = igHead(caption);
-  const sch = await igScheduled(caption, scheduleIso).catch(() => null);
+  const sch = await igScheduled(caption, scheduleIso);
   if (sch) return sch;
   return withTab('https://www.instagram.com/', async (id) => {
     let u = null;

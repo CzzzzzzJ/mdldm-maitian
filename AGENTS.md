@@ -44,7 +44,7 @@ node src/validate.mjs <工程目录>
 
 ## 架构
 
-`src/hub.mjs` 是 CLI 和守护进程。`daemon` 默认每 60 分钟巡检一次：扫发布计划、提醒还没点发布的平台、到点 `sync` 取链接、头三天按 `sampleHours`（默认 6 小时）加密采样、每天 10 点后采近 30 天流量并出第 1/3/7 天复盘、`keepAlive` 平台保活。小鹅通销售和最近订单另按独立计划同步，默认每 60 分钟一次。「系统 → 自动调度」可分别设置巡检和销售同步的间隔，或指定每日的北京时间。网页由守护进程拉起（`HUB_NO_WEB=1` 可关），默认 `http://localhost:8787/?key=<web.key>`。
+`src/hub.mjs` 是 CLI 和守护进程。`daemon` 默认每 60 分钟巡检一次：扫发布计划、提醒还没点发布的平台、到点 `sync` 取链接、头三天按 `sampleHours`（默认 6 小时）加密采样、每天 10 点后采近 30 天流量并出第 1/3/7 天复盘、`keepAlive` 平台保活。小鹅通销售和最近订单另按独立计划同步，默认每 60 分钟一次。「系统 → 自动调度」可分别设置巡检和销售同步的间隔，或指定每日的北京时间。网页由守护进程拉起（`HUB_NO_WEB=1` 可关），默认只监听 `127.0.0.1:8787`。口令在 `config.json` 的 `web.key`，不写进启动日志、`data/tunnel.json` 和飞书。局域网要显式把 `web.host` 设成 `0.0.0.0`。同一期的 `hub run` / `hub submit` 用跨进程发布锁（进程不在或租约过期可接手）。X、YouTube、Instagram、Threads、知识站查重失败时停在「待你点发布」，不当成没有重复继续上传。
 
 状态在 SQLite（`node:sqlite`），默认 `data/hub.db`，可用 `MAITIAN_DB` 换路径。表在 `src/db.mjs`：`episodes` / `tasks`（平台状态机）/ `metrics` + `samples` / `snapshots`（发布时的 `publish.json`）/ `logs` / `meta`，以及站点转化、小鹅通订单、账号作品流量。已到位状态 `LOCKED`（`filled`、`awaiting_user`、`scheduled`、`published`）不允许再跑，这是防重。`config.disabled` 里的平台不登录、不体检、不发布、不采粉丝；`src/web.mjs` 改的是同一个 `config` 对象，守护进程不用重启。
 
@@ -62,5 +62,5 @@ node src/validate.mjs <工程目录>
 
 - 一个改动只做一件事。平台规则要同时对上三处：发布助手的 `PLATFORMS`、本仓库 `make-publish.mjs` 的字段提取、`skills/maitian-publish/SKILL.md` 的写法。采集器在 `src/metrics.mjs` 的 `collectors` 和 `src/followers.mjs`；新平台还要登记 `hub.mjs` 的 `ALL_IDS` / `LOGIN_PAGES` 和 `db.mjs` 的 `NAMES`。
 - 国内平台只填写、不点最终发布。小红书只读已渲染内容，不在页面里直接调它的接口。
-- 网页改动在 `src/web.mjs`（路由和数据）和 `src/web/board.html`、`pages.html`、`mt.js`、`mt.css`。页面口令是 `web.key`，没有口令的请求一律 401。
+- 网页改动在 `src/web.mjs`（路由和数据）和 `src/web/board.html`、`pages.html`、`mt.js`、`mt.css`。页面口令是 `web.key`，没有口令的请求一律 401。默认只绑本机，启动日志不打印口令。
 - 测试用 `node:test` + `node:assert/strict`。会碰本机已装插件或真实 `config.json` 的用例，用临时 `MAITIAN_CONFIG` / `MAITIAN_DB` 隔开。

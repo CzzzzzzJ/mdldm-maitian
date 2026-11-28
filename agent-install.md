@@ -110,7 +110,7 @@ cp config.example.json config.json
    cd "${MAITIAN_HOME:-$HOME/maitian}/mdldm-maitian" && node src/init.mjs
    ```
 
-   向导最后会给出大屏地址 `http://localhost:8787/?key=<web.key>`，请用户在浏览器打开。
+   向导最后会给出大屏地址 `http://127.0.0.1:8787/?key=<web.key>`，请用户在浏览器打开。口令只在这次向导里出现；守护进程日志和飞书不带口令。网页默认只监听本机。
 
 2. **装麦田发布助手（Chrome 插件）**：请用户在麦田的专用 Chrome 里打开 [Chrome 应用商店](https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj)，点「添加至 Chrome」，之后自动更新。
 
