@@ -3,8 +3,9 @@
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { extraEnabled } from './publish-channels.mjs';
 
-const names = { bilibili: 'B站', douyin: '抖音', xhs: '小红书' };
+const names = { bilibili: 'B站', douyin: '抖音', xhs: '小红书', acfun: 'A站', kuaishou: '快手' };
 const absolute = p => path.resolve(p.replace(/^~(?=\/|$)/, os.homedir()));
 export function accountTargets(cfg) {
   const list = cfg.bilibiliAccounts ?? [];
@@ -12,7 +13,9 @@ export function accountTargets(cfg) {
   const defaultProfile = absolute(cfg.chromeProfile || '~/publish-hub/chrome-profile');
   const disabled = id => (cfg.disabled || []).includes(id) || (cfg.disabledPlatforms || []).includes(id) || (Array.isArray(cfg.enabledPlatforms) && !cfg.enabledPlatforms.includes(id));
   const targets = [], ids = new Set(), ports = new Set([defaultPort]), profiles = new Set([defaultProfile]), uids = new Set();
+  const enabled = extraEnabled(cfg);
   for (const [platform, name] of Object.entries(names)) {
+    if (['acfun','kuaishou'].includes(platform) && !enabled.includes(platform)) continue;
     if (disabled(platform)) continue;
     const base = { id: platform, platform, name, chromePort: defaultPort, chromeProfile: defaultProfile };
     if (platform !== 'bilibili') { targets.push(base); continue; }

@@ -1,6 +1,8 @@
 // 流量采集：只读自己创作者后台的数据，每天一次。按作品 ID 匹配（标题在平台上可能改过）。
 import { evaluate, withTab, sleep } from './driver.mjs';
 import { SITE } from './site.mjs';
+import { chinaMetricPages, chinaMetricsJs, chinaDetailJs, acfunDetailJs } from './china-metrics.mjs';
+import { scanKuaishouList } from './china-account.mjs';
 
 const J = JSON.stringify;
 // "1.2万" "578.3 萬" "6,017" "5.3K" → 数字
@@ -27,7 +29,66 @@ export const thActionsJs = `(()=>{const L=${J(TH_ACTIONS)};const o={};let hit=0;
       for(const [k,ls] of Object.entries(L)){const s=[...document.querySelectorAll('svg')].find(s=>ls.includes(s.getAttribute('aria-label')||(s.querySelector('title')||{}).textContent||''));const b=s&&s.closest('[role=button],button');if(!b){o[k]=null;continue}hit++;o[k]=b.innerText.trim()||'0'}
       return hit?o:null})()`;
 
+const chinaCollector = id => async options => {
+  const watch = id === 'kuaishou' && /^https:\/\/www\.kuaishou\.com\/short-video\/([\w-]+)(?:[/?#]|$)/i.exec(options.url || '')?.[1];
+  if (watch) {
+    const found = await scanKuaishouList(watch);
+    if (!found) return null;
+    const base = Object.fromEntries(['views','likes','comments'].filter(k=>found[k] != null).map(k=>[k,found[k]]));
+    const path = '/statistics/article/detail/' + watch;
+    const exact = `location.origin==='https://cp.kuaishou.com'&&location.pathname.replace(/\\/$/,'')===${J(path)}`;
+    const activeTab = label => `[...document.querySelectorAll('.data_tab .tab.tab_active')].some(e=>e.getClientRects().length&&e.innerText.trim()===${J(label)})`;
+    const detail = await withTab('https://cp.kuaishou.com' + path, async tab => {
+      const read = async (label, ready) => {
+        for (let i=0;i<7;i++) {
+          const value = await evaluate(tab, `(${exact})&&(${activeTab(label)}) ? (${chinaDetailJs('kuaishou')}) : null`);
+          if (value && ready(value)) return value;
+          if (i<6) await sleep(650);
+        }
+        return null;
+      };
+      const playback = await read('播放数据', m=>m.views != null || Object.keys(m.extra || {}).some(k=>k !== '涨粉')).catch(() => null);
+      const clicked = await evaluate(tab, `(()=>{if(!(${exact}))return false;const a=[...document.querySelectorAll('.data_tab .tab')].filter(e=>e.getClientRects().length&&e.innerText.trim()==='互动效果');if(a.length!==1)return false;a[0].click();return true})()`).catch(() => false);
+      const interaction = clicked ? await read('互动效果', m=>['likes','comments','favorites','shares'].some(k=>m[k] != null) || m.extra?.涨粉 != null).catch(() => null) : null;
+      return {playback,interaction};
+    }, {wait:3000}).catch(() => null);
+    const bonus = detail?.interaction;
+    // 作品列表的累计播放/赞/评优先；详情的图表周期不能覆盖它。
+    for (const field of ['likes','comments','favorites','shares']) if (base[field] == null && bonus?.[field] != null) base[field] = bonus[field];
+    return {...base,extra:{...detail?.playback?.extra,...bonus?.extra}};
+  }
+  const { url, row } = chinaMetricPages[id];
+  return withTab(url, async tab => {
+    for (let i = 0; i < 10; i++) {
+      const state = await evaluate(tab, `({rows:!!document.querySelector(${J(row)}), login:/\\/login\\b/.test(location.pathname)})`).catch(() => null);
+      if (state?.login) return null;
+      if (state?.rows) {
+        const base = await evaluate(tab, chinaMetricsJs(id, options));
+        if (base && id === 'acfun') {
+          const work = /^https:\/\/www\.acfun\.cn\/v\/(ac\d+)(?:[/?#]|$)/.exec(options.url || '')?.[1];
+          const detail = work && await withTab('https://www.acfun.cn/v/' + work, async t => {
+            for (let n=0;n<7;n++) {
+              if (await evaluate(t, `location.hostname==='www.acfun.cn'&&location.pathname.replace(/\\/$/,'')===${J('/v/' + work)}`)) {
+                const m = await evaluate(t, acfunDetailJs);
+                if (Object.keys(m).length) return m;
+              }
+              await sleep(650);
+            }
+            return null;
+          }, {wait:4000}).catch(() => null);
+          return detail ? {...base,...detail,extra:{...base.extra,...detail.extra}} : base;
+        }
+        return base;
+      }
+      if (i < 9) await sleep(1000);
+    }
+    return null;
+  }, { wait: 3000 });
+};
+
 export const collectors = {
+  acfun: chinaCollector('acfun'),
+  kuaishou: chinaCollector('kuaishou'),
   async bilibili({ url, p }) {
     const bvid = idOf(url, /video\/(BV\w+)/);
     const st = await withTab('https://member.bilibili.com/platform/upload-manager/article', (t) => evaluate(t, `fetch('/x/web/archives?status=is_pubing%2Cpubed%2Cnot_pubed&pn=1&ps=50&coop=1',{credentials:'include'}).then(r=>r.json()).then(x=>{const a=(x.data&&x.data.arc_audits||[]).find(a=>a.Archive.bvid===${J(bvid)}||a.Archive.title===${J(p.title)});return a?a.stat:null})`));

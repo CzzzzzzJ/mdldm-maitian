@@ -6,9 +6,11 @@ import { syncAccountTraffic } from './account-traffic.mjs';
 import { collectBilibiliVideos } from './account-bilibili.mjs';
 import { collectDouyinVideos } from './account-douyin.mjs';
 import { collectXhsVideos } from './account-xhs.mjs';
+import { scanChinaAccount } from './china-account.mjs';
 import * as drv from './driver.mjs';
 
-const collectors = { bilibili: collectBilibiliVideos, douyin: collectDouyinVideos, xhs: collectXhsVideos };
+const collectors = { bilibili: collectBilibiliVideos, douyin: collectDouyinVideos, xhs: collectXhsVideos,
+  acfun: () => scanChinaAccount('acfun'), kuaishou: () => scanChinaAccount('kuaishou') };
 export const currentAccountTargets = () => accountTargets(JSON.parse(fs.readFileSync(CFG, 'utf8')));
 
 async function bilibiliUid() {

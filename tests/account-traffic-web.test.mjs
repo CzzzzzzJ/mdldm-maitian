@@ -56,6 +56,8 @@ test('account traffic API is isolated, authenticated, and does not accept browse
     await new Promise(resolve=>setTimeout(resolve,30));
   }
   assert.equal(action?.ok,true,action?.tail);
+  const overviewBefore = await fetch(overview,{headers}).then(r=>r.json());
+  assert.deepEqual(overviewBefore.channelAccounts, {});
 });
 
 test('traffic page renders useful empty/account/project states and safely escapes account content', async () => {

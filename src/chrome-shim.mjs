@@ -4,6 +4,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import os from 'node:os'; import path from 'node:path'; import fs from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { config } from './feishu.mjs';
+import { chromeStartGuard } from './chrome-start.mjs';
 
 const profileOf = (settings) => path.resolve((settings.chromeProfile || '~/publish-hub/chrome-profile').replace(/^~(?=\/|$)/, os.homedir()));
 export const PROFILE = profileOf(config);
@@ -57,8 +58,7 @@ const version = () => fetch(`http://127.0.0.1:${PORT}/json/version`, { signal: A
 });
 
 // 启动专用 Chrome（已经在跑就直接用）。foreground=true 时把窗口带到前台（登录用）
-async function launchChrome({ foreground = false } = {}) {
-  try { await version(); } catch {
+const ensureStarted = chromeStartGuard(() => version().then(() => true, () => false), async () => {
     fs.mkdirSync(PROFILE, { recursive: true });
     const args = [`--user-data-dir=${PROFILE}`, `--remote-debugging-port=${PORT}`, '--remote-debugging-address=127.0.0.1', '--no-first-run', '--no-default-browser-check',
       '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling', '--window-size=1500,1000'];
@@ -66,8 +66,11 @@ async function launchChrome({ foreground = false } = {}) {
     let launchError;
     proc.on('error', e => { launchError = e; });
     proc.unref();
-    for (let i = 0; i < 30; i++) { await sleep(500); if (launchError) throw new Error('专用 Chrome 启动失败：' + launchError.message); try { await version(); break; } catch { if (i === 29) throw new Error('专用 Chrome 没启动起来'); } }
-  }
+    for (let i = 0; i < 30; i++) { await sleep(500); if (launchError) throw new Error('专用 Chrome 启动失败：' + launchError.message); try { await version(); return; } catch {} }
+    throw new Error(`专用 Chrome 调试端口 ${PORT} 不可用；请检查端口是否被占用或保留，以及专用 Chrome 是否已用其他端口启动`);
+});
+async function launchChrome({ foreground = false } = {}) {
+  await ensureStarted();
   if (foreground) { try { execFileSync('osascript', ['-e', `tell application "System Events" to set frontmost of (first process whose unix id is ${await pid()}) to true`]); } catch { /* 不影响 */ } }
 }
 async function pid() { return execFileSync('lsof', ['-ti', `tcp:${PORT}`, '-sTCP:LISTEN']).toString().trim().split('\n')[0]; }
