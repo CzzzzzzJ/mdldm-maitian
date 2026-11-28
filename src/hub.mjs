@@ -26,6 +26,7 @@ import { learnOn, learnUrl, GROUP_URL } from './learn.mjs';
 import { validateProject } from './validate.mjs';
 import { STORE_URL, pluginInfo } from './plugin.mjs';
 import { EXTRA_MANUAL, isExtraManual, extraEnabled, confirmedLink, upgradeMessage } from './publish-channels.mjs';
+import { accountWorkId, workLinkedElsewhere, inWriteTransaction } from './china-dashboard.mjs';
 import { xExisting, xSubmit, ytRows, ytSubmit, zszCourses, douyinTopics, igExisting, igSubmit, threadsExisting, threadsSubmit } from './checks.mjs';
 // 出错时附一次交流群和教程入口；每天最多一次，不刷屏（config.learnLinks = false 关掉）
 function helpTip() {
@@ -79,6 +80,15 @@ function table(eid) {
 }
 
 async function runBatch(ep, pj, batch) {
+  // 关联历史作品可以发生在登录检查期间；正式开跑前原子地复核并占用任务。
+  batch = inWriteTransaction(db, () => batch.filter(id => {
+    if (!isExtraManual(id)) return true;
+    const task = getTask(ep.id, id);
+    if (LOCKED.includes(task?.state) || task?.state === 'running') return false;
+    setTask(ep.id, id, 'running', '开始填写');
+    return true;
+  }));
+  if (!batch.length) return {};
   log(ep.id, batch.join(','), 'start-batch', drv.mode);
   const last = {};
   const onState = (s) => {
@@ -90,7 +100,8 @@ async function runBatch(ep, pj, batch) {
       if (state === 'failed' || state === 'not_logged_in') notify(`❌ ${ep.name}\n${NAMES[s.id]}：${STATE_CN[state]}，${detail}${helpTip()}`);
     }
   };
-  await drv.runBatch(projectOf(ep, pj), batch, onState, () => notify(`⚠️ ${ep.name}\n浏览器 2 分钟没响应，可能有弹窗卡住了，请看一眼`));
+  try { await drv.runBatch(projectOf(ep, pj), batch, onState, () => notify(`⚠️ ${ep.name}\n浏览器 2 分钟没响应，可能有弹窗卡住了，请看一眼`)); }
+  catch (e) { for (const id of batch) setTask(ep.id, id, 'failed', e.message); throw e; }
   return last;
 }
 
@@ -193,13 +204,21 @@ async function run() {
   }
   if (drv.mode === 'plugin' && todo.some(isExtraManual)) await drv.ensure();
   const unsupported = await drv.missingNewChannels(todo);
-  for (const id of unsupported) { const msg = upgradeMessage(id); setTask(ep.id, id, 'failed', msg); console.log(msg); }
+  const setBeforeRun = (id, state, detail) => {
+    if (!isExtraManual(id)) return setTask(ep.id, id, state, detail);
+    return inWriteTransaction(db, () => {
+      const current = getTask(ep.id, id);
+      if (!LOCKED.includes(current?.state) && current?.state !== 'running') return setTask(ep.id, id, state, detail);
+      return false;
+    });
+  };
+  for (const id of unsupported) { const msg = upgradeMessage(id); setBeforeRun(id, 'failed', msg); console.log(msg); }
   todo = todo.filter(id => !unsupported.includes(id));
   for (const id of todo.filter(isExtraManual)) {
     const r = await validateProject(dir, { platforms: [id] }).catch(e => ({ ok: false, errors: [`${NAMES[id]} 校验失败：${e.message}`] }));
     if (r.ok) continue;
     const detail = r.errors.join('；');
-    setTask(ep.id, id, 'failed', detail); console.error(detail);
+    setBeforeRun(id, 'failed', detail); console.error(detail);
     todo = todo.filter(p => p !== id);
   }
   if (!todo.length) { console.log('没有要跑的平台。\n' + table(ep.id)); return; }
@@ -227,7 +246,7 @@ async function run() {
   }
   if (!todo.length) { await notify(`📋 ${ep.name}\n本轮没有需要现在上传的平台\n${table(ep.id)}`); return; }
 
-  for (const id of todo) setTask(ep.id, id, 'pending', '');
+  for (const id of todo) setBeforeRun(id, 'pending', '');
   // 开跑前先查登录（2026-11-15 视频号到开跑才发现掉线，扫码耽误十几分钟）：掉线的立刻发飞书，其他平台照跑，扫完码本轮末尾自动补跑
   let loggedOut = [];
   try {
@@ -244,7 +263,7 @@ async function run() {
     if (!batch.length) continue;
     let res;
     try { res = await runBatch(ep, pj, batch); }
-    catch (e) { for (const id of batch) setTask(ep.id, id, 'failed', e.message); await notify(`❌ ${ep.name}\n${batch.map(i => NAMES[i]).join('、')} 这一批没跑起来：${e.message}${helpTip()}`); continue; }
+    catch (e) { await notify(`❌ ${ep.name}\n${batch.map(i => NAMES[i]).join('、')} 这一批没跑起来：${e.message}${helpTip()}`); continue; }
     for (const id of batch) if (res[id]) pending.push(after(ep, pj, id, res[id]).then(async () => {
       const t = getTask(ep.id, id);
       if (['awaiting_user', 'scheduled', 'published'].includes(t.state)) await notify(`${t.state === 'awaiting_user' ? '👉' : '✅'} ${ep.name}\n${NAMES[id]}：${STATE_CN[t.state]}${t.detail ? `，${t.detail}` : ''}${t.url ? `\n${t.url}` : ''}`);
@@ -259,7 +278,7 @@ async function run() {
     const ok = retry.filter(i => lr[i] && lr[i].ok);
     if (!ok.length) continue;
     retry = retry.filter(i => !ok.includes(i));
-    let res; try { res = await runBatch(ep, pj, ok); } catch (e) { for (const id of ok) setTask(ep.id, id, 'failed', e.message); continue; }
+    let res; try { res = await runBatch(ep, pj, ok); } catch { continue; }
     await Promise.all(ok.filter(id => res[id]).map(id => after(ep, pj, id, res[id]).then(async () => {
       const t = getTask(ep.id, id);
       if (['awaiting_user', 'scheduled', 'published'].includes(t.state)) await notify(`${t.state === 'awaiting_user' ? '👉' : '✅'} ${ep.name}\n${NAMES[id]}（扫码后补跑）：${STATE_CN[t.state]}${t.detail ? `，${t.detail}` : ''}${t.url ? `\n${t.url}` : ''}`);
@@ -289,7 +308,13 @@ async function sync(ep, ids, quiet = false) {
       log(ep.id, id, 'links', JSON.stringify(v));
       if (url && (t?.state !== 'published' || !t?.url)) {
         const platform = pj.platforms[id], publishedAt = bjTime(v.time), publishedTitle = platform.published_title || platform.title || platform.caption;
-        setTask(ep.id, id, 'published', '已确认公开作品', { url, publishedAt, publishedTitle });
+        const linked = inWriteTransaction(db, () => {
+          const current = getTask(ep.id, id);
+          if (current?.state === 'running' || current?.state === 'published' && current.url || workLinkedElsewhere(db, ep.id, id, url)) return false;
+          setTask(ep.id, id, 'published', '已确认公开作品', { url, publishedAt, publishedTitle });
+          return true;
+        });
+        if (!linked) continue;
         if (publishedAt) { platform.published_at = publishedAt; platform.published_title = publishedTitle; touchedPlat = true; }
       }
       else if (!url && t && ['awaiting_user', 'reviewing', 'scheduled'].includes(t.state)) {
@@ -348,11 +373,12 @@ const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)
 let SKIP_METRICS = [];   // hub metrics --skip xhs：这次不采的平台
 async function collectMetrics(ep) {
   const pj = loadProject(ep.dir), day = today(), lines = []; let total = 0, totalDelta = 0, any = false;
-  const tasks = getTasks(ep.id).filter(t => canPublish(t.platform) && (!isExtraManual(t.platform) || !DISABLED.has(t.platform)) && collectors[t.platform] && pj.platforms[t.platform] && t.state === 'published' && !SKIP_METRICS.includes(t.platform));
+  const tasks = getTasks(ep.id).filter(t => canPublish(t.platform) && (!isExtraManual(t.platform) || !DISABLED.has(t.platform)) && collectors[t.platform]
+    && (pj.platforms[t.platform] || accountWorkId(t.platform, t.url)) && t.state === 'published' && !SKIP_METRICS.includes(t.platform));
   if (!tasks.length) return null;
   await drv.ensure();
   for (const t of tasks) {
-    const fn = collectors[t.platform], p = pj.platforms[t.platform];
+    const fn = collectors[t.platform], p = pj.platforms[t.platform] || {};
     let m = null; try { m = await fn({ url: t.url, p, detail: t.detail, publishedAt: t.published_at || p.published_at }); } catch (e) { log(ep.id, t.platform, 'metrics-error', e.message); }
     if (!m) { lines.push(`${NAMES[t.platform]}：没读到`); continue; }
     saveMetric(day, ep.id, t.platform, m); any = true;

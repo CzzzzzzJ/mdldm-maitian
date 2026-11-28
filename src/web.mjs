@@ -1,6 +1,6 @@
 // 麦田：本地网页。播种（发布）、长势（流量）、收成（转化）、粮仓（档案）
 import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
-import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
+import { db, NAMES, STATE_CN, episodes, getEpisode, getTask, getTasks, setTask, log, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
 import { SITE, siteOn, refreshSite, matchesSiteData } from './site.mjs';
 import { applyFeishuPatch, applySitePatch, saveConfig, saveSchedules, testSite } from './config-admin.mjs';
@@ -21,16 +21,41 @@ const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
-import { extraEnabled } from './publish-channels.mjs';
+import { extraEnabled, isExtraManual } from './publish-channels.mjs';
+import { accountSummaries, accountWorkId, accountWorkForUrl, accountCandidates, workLinkedElsewhere, inWriteTransaction } from './china-dashboard.mjs';
 const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'threads', ...extraEnabled(config), ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 const platformList = () => PLATFORMS.filter(id => id !== 'zsz' || !SITE?.salesOnly).map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
+const chinaEnabled = () => extraEnabled(config).filter(id => !(config.disabled || []).includes(id));
+const fanPeriod = () => {
+  try { return JSON.parse(getMeta('kuaishouFanPeriod') || 'null'); } catch { return null; }
+};
+async function verifyAcfunPublic(id) {
+  const { evaluate, withTab, sleep } = await import('./driver.mjs');
+  const url = 'https://www.acfun.cn/v/' + id;
+  return withTab(url, async tab => {
+    for (let i = 0; i < 5; i++) {
+      const ok = await evaluate(tab, `location.origin+location.pathname.replace(/\\/$/,'')===${JSON.stringify(url)}&&
+        !!document.querySelector('h1,[class*=video-title]')&&!!document.querySelector('#player,video,[class*=player]')&&
+        !/视频不存在|视频正在审核|仅自己可见|已下架/.test(document.body.innerText)`);
+      if (ok) return true;
+      if (i < 4) await sleep(600);
+    }
+    return false;
+  }, { wait:2500 }).catch(() => false);
+}
 
 function episodeView(ep, full = false) {
   const snap = getSnapshot(ep.id), pj = (snap && JSON.parse(snap.project)) || readPj(ep.dir) || { platforms: {} };
   let views = 0, inter = 0;
   const tasks = getTasks(ep.id).map(t => {
-    const m = latest.get(ep.id, t.platform) || null;
+    const saved = latest.get(ep.id, t.platform) || null;
+    const account = t.state === 'published' && accountWorkForUrl(db, t.platform, t.url);
+    const accountNewer = account && account.collectedAt > (saved?.collected_at || '');
+    const m = account ? { ...saved, day: accountNewer ? new Date(Date.parse(account.collectedAt) + 8 * 3600e3).toISOString().slice(0, 10) : saved.day,
+      ...Object.fromEntries(['views', 'likes', 'comments', 'favorites', 'shares'].map(key => [key,
+        accountNewer ? account[key] ?? saved?.[key] : saved[key] ?? account[key]])),
+      extra: saved?.extra || account.extra } : saved;
     if (m) { views += m.views || 0; inter += (m.likes || 0) + (m.comments || 0) + (m.favorites || 0) + (m.shares || 0); }
     const p = pj.platforms[t.platform] || {};
     return { platform: t.platform, name: NAMES[t.platform] || t.platform, state: t.state, stateCn: STATE_CN[t.state] || t.state, detail: t.detail || '', url: t.url || '', updatedAt: t.updated_at,
@@ -70,6 +95,11 @@ function episodeView(ep, full = false) {
   const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, publishAt, createdAt: ep.created_at, dir: ep.dir,
     campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers, coverVer, durationSec: pj.durationSec || 0, tasks, views, inter };
   if (full) {
+    const candidates = chinaEnabled().filter(id => !tasks.some(t => t.platform === id && t.url));
+    out.accountLinks = Object.fromEntries(candidates.map(id => {
+      const p = pj.platforms?.[id] || {};
+      return [id, accountCandidates(db, id, [ep.name, ...ep.name.split(/[｜|]/), p.published_title, p.title, p.caption], [publishAt, ep.schedule])];
+    }));
     out.logs = recentLogs(ep.id, 200);
     out.metrics = db.prepare('SELECT day, platform, views, likes, comments, favorites, shares FROM metrics WHERE episode_id=? ORDER BY day').all(ep.id);
     out.snapshotAt = snap && snap.taken_at;
@@ -240,9 +270,10 @@ async function handle(req, res) {
     const sales = salesOnly ? buildSalesSummary({ days: siteDays, now: salesNow,
       orders: readable ? db.prepare('SELECT id,title,amount,status,time,kind FROM site_orders ORDER BY time DESC,id DESC LIMIT 10').all() : [],
       syncedAt: readable && getMeta('siteLiveSyncedAt'), ordersSyncedAt: readable && getMeta('siteOrdersSyncedAt'), error: getMeta('siteError'), ordersError: getMeta('siteOrdersError') }) : null;
-    const episodeRows = episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e));
+    const enabled = chinaEnabled();
     return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
+      channelAccounts: accountSummaries(db, enabled), kuaishouFanPeriod: enabled.includes('kuaishou') ? fanPeriod() : null,
       site: { days: siteDays, channels: readable && !salesOnly ? db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all() : [],
         campaigns: readable && !salesOnly ? db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all() : [], campaignsOn: SITE && !salesOnly && getMeta('siteCampaigns') === 'on', ...(sales && { sales }) },
       metrics: db.prepare('SELECT day, episode_id, platform, views, likes, comments, favorites, shares FROM metrics ORDER BY day').all(),
@@ -283,6 +314,31 @@ async function handle(req, res) {
     }
   }
   if (u.pathname === '/api/episode') { const ep = getEpisode(u.searchParams.get('id')); return ep ? send(res, 200, episodeView(ep, true)) : send(res, 404, { error: '没有这一期' }); }
+  if (u.pathname === '/api/episode-account-link') {
+    if (req.method !== 'POST') return send(res, 405, { error: '请求方法不支持' }, undefined, { allow: 'POST' });
+    if (!W.key && !(LOGIN && sessionOk(req)) && !(await accessEmail(req, W.access))) return send(res, 401, { error: '请配置网页口令并登录' });
+    const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+    if (req.headers['sec-fetch-site'] === 'cross-site' || (req.headers.origin && req.headers.origin !== protocol + '://' + req.headers.host)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, { error: '请发送 JSON' });
+    let input;
+    try { input = await readJson(req, 8192); } catch { return send(res, 400, { error: '请求格式不对' }); }
+    const { id, platform, url } = input || {};
+    if (typeof id !== 'string' || !getEpisode(id) || !isExtraManual(platform) || !chinaEnabled().includes(platform)) return send(res, 400, { error: '期数或平台不对' });
+    const work = accountWorkForUrl(db, platform, url);
+    if (!work || accountWorkId(platform, work.url) !== work.id) return send(res, 404, { error: '公开作品未在账号采集结果中找到，请先采集账号流量' });
+    if (platform === 'acfun' && !await verifyAcfunPublic(work.id)) return send(res, 422, { error: '未能确认该 A 站作品的公开播放页' });
+    const result = inWriteTransaction(db, () => {
+      if (!accountWorkForUrl(db, platform, work.url)) return [409, { error: '作品采集结果已更新，请刷新后重试' }];
+      const task = getTask(id, platform);
+      if (['running','filled'].includes(task?.state) || task?.url && accountWorkId(platform, task.url) !== work.id) return [409, { error: '这一期正在分发或已关联其他作品' }];
+      if (workLinkedElsewhere(db, id, platform, work.url)) return [409, { error: '这部作品已关联到其他期' }];
+      if (task?.state === 'published' && task.url) return [200, { ok: true }];
+      setTask(id, platform, 'published', '已核实并关联账号作品', { url: work.url, publishedAt: work.publishedAt || undefined, publishedTitle: work.title });
+      log(id, platform, 'mark', '关联已发布账号作品');
+      return [200, { ok: true }];
+    });
+    return send(res, ...result);
+  }
   if (u.pathname === '/cover' || u.pathname === '/shot') {
     const ep = getEpisode(u.searchParams.get('id')); if (!ep) return send(res, 404, '');
     let f;

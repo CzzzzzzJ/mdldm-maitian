@@ -41,6 +41,7 @@ function fixture(getSettings = true, overviewData = overview) {
       return { ok: responses[url] != null, status: 404, json: async () => responses[url] };
     },
   });
+  vm.runInContext(source('platform-logos.js'), ctx);
   vm.runInContext(source('mt.js'), ctx);
   vm.runInContext(page, ctx);
   return { calls, elements, listeners, run: js => vm.runInContext(js, ctx) };

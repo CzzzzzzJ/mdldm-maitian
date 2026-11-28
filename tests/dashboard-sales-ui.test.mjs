@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const inline = file => [...fs.readFileSync(path.join(root, file), 'utf8').matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(x => x[1]).join('\n');
+const scripts = file => [...fs.readFileSync(path.join(root, file), 'utf8').matchAll(/<script(?: src="\/static\/([^"]+)")?>([\s\S]*?)<\/script>/g)]
+  .map(([, asset, text]) => asset ? fs.readFileSync(path.join(root, 'src/web', asset), 'utf8') : text).join('\n');
 const period = (days, orders, revenue) => ({ days, complete: true, orders, revenue, refund: 2.01, net: revenue - 2.01 });
 const sales = () => ({ today: '2026-11-17', syncedAt: '2026-11-17T08:00:00Z', ordersSyncedAt: '2026-11-17T08:00:00Z', error: '', ordersError: '', periods: {
   today: period(1, 2, 100.01), week: period(7, 22, 700.07), month: period(30, 88, 3000.3),
@@ -17,14 +18,27 @@ const fixture = s => ({ now: '2026-11-17T08:00:00Z', siteOn: true, siteSalesOnly
 function boardContext() {
   const screen = { innerHTML: '' }, tip = { style: {} }, listeners = {};
   const ctx = vm.createContext({ console, Date, URLSearchParams, innerWidth: 1300, performance, requestAnimationFrame() {}, matchMedia: () => ({ matches: false }), fetch: () => new Promise(() => {}), setInterval() {}, clearInterval() {}, addEventListener() {}, location: { search: '' }, document: { querySelector: s => s === '#screen' ? screen : s === '#tip' ? tip : null, querySelectorAll: () => [], addEventListener: (type, fn) => (listeners[type] ||= []).push(fn), body: { classList: { add() {} } } } });
-  vm.runInContext(inline('src/web/board.html'), ctx);
+  vm.runInContext(scripts('src/web/board.html'), ctx);
   return {ctx,screen,listeners};
 }
 function pageContext() {
   const ctx = vm.createContext({ console, Date, URLSearchParams, fetch: () => new Promise(() => {}), setInterval() {}, clearInterval() {}, addEventListener() {}, location: { hash: '#/convert' }, document: { querySelector() { return null; }, addEventListener() {}, createElement() { return {}; } } });
-  vm.runInContext(fs.readFileSync(path.join(root,'src/web/mt.js'),'utf8')+'\n'+inline('src/web/pages.html'),ctx);
+  vm.runInContext(scripts('src/web/pages.html'),ctx);
   return ctx;
 }
+
+test('new platform cards separate account totals, unknown fans and period-only net', async () => {
+  const {ctx,screen} = boardContext();
+  const data = {...fixture(null), siteOn:false, siteSalesOnly:false, metrics:[], samples:[],
+    health:{platforms:[{id:'acfun'},{id:'kuaishou'}]},
+    channelAccounts:{acfun:{videos:22,views:14661,syncedAt:'2026-11-28T08:00:00Z'},kuaishou:{videos:64,views:0}},
+    kuaishouFanPeriod:{days:7,net:-1}};
+  ctx.fetch = async () => ({ok:true,json:async()=>data});
+  await vm.runInContext('load()',ctx);
+  for (const item of ['platform-acfun.png','platform-kuaishou.png','公开作品','账号累计播放','14,661','暂无粉丝总数','近 7 天净增']) assert.ok(screen.innerHTML.includes(item),item);
+  assert.match(screen.innerHTML, /账号累计播放<\/dt><dd>0<\/dd>/);
+  assert.doesNotMatch(screen.innerHTML, /<dt>账号累计播放<\/dt><dd>–<\/dd>/);
+});
 
 test('dashboard displays canonical today, week and month values and five escaped order events', async () => {
   const {ctx,screen} = boardContext(), data=fixture(sales());

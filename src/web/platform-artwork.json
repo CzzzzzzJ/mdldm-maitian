@@ -1,0 +1,99 @@
+{
+  "acfun": {
+    "file": "platform-acfun.png",
+    "appId": 894974941,
+    "product": "AcFun-国内弹幕动漫视频第一家",
+    "publisher": "北京弹幕网络科技有限公司",
+    "page": "https://apps.apple.com/cn/app/acfun-%E5%9B%BD%E5%86%85%E5%BC%B9%E5%B9%95%E5%8A%A8%E6%BC%AB%E8%A7%86%E9%A2%91%E7%AC%AC%E4%B8%80%E5%AE%B6/id894974941",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/4a/f2/91/4af291a4-f7da-4eac-429f-2539b1ce29bc/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/120x120bb.png",
+    "sha256": "017037d94907e0e5da265150163abffc546b132c79a09523d3edda29b313e37d"
+  },
+  "kuaishou": {
+    "file": "platform-kuaishou.png",
+    "appId": 440948110,
+    "product": "快手",
+    "publisher": "Beijing Kwai Technology Co., Ltd.",
+    "page": "https://apps.apple.com/cn/app/%E5%BF%AB%E6%89%8B/id440948110",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/df/9c/89/df9c8954-ead0-53ec-946b-fa06d95b77d1/AppIcon-0-0-1x_U007emarketing-0-8-0-sRGB-85-220.png/120x120bb.png",
+    "sha256": "672be279af5adc1e163b5ed6354b6efb4aac37f67565fd98e623667eff54aa41"
+  },
+  "bilibili": {
+    "file": "platform-bilibili.png",
+    "appId": 736536022,
+    "product": "哔哩哔哩-弹幕番剧直播高清视频",
+    "publisher": "bilibili",
+    "page": "https://apps.apple.com/cn/app/%E5%93%94%E5%93%A9%E5%93%94%E5%93%A9-%E5%BC%B9%E5%B9%95%E7%95%AA%E5%89%A7%E7%9B%B4%E6%92%AD%E9%AB%98%E6%B8%85%E8%A7%86%E9%A2%91/id736536022",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/e0/5f/06/e05f0629-26ec-d0f9-6bde-42276c9e0d76/AppIcon-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/120x120bb.png",
+    "sha256": "5e0e6526e36fed9e71a6964508e07e29d8401d9fd21b1a7353bc3ff7ab55ade4"
+  },
+  "douyin": {
+    "file": "platform-douyin.png",
+    "appId": 1142110895,
+    "product": "抖音",
+    "publisher": "Beijing Douyin Technology Co., Ltd.",
+    "page": "https://apps.apple.com/cn/app/%E6%8A%96%E9%9F%B3/id1142110895",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/23/26/2e/23262e2f-efcc-3c94-af6a-b6e4b85124e6/AppIcon-0-0-1x_U007emarketing-0-0-0-7-0-0-85-220.png/120x120bb.png",
+    "sha256": "a912f33f717273f77ab51177b5fe5338e280e4ea1903b17327bbd2e39bfe6fc0"
+  },
+  "xhs": {
+    "file": "platform-xhs.png",
+    "appId": 741292507,
+    "product": "小红书 - 你的生活兴趣社区",
+    "publisher": "Xingin",
+    "page": "https://apps.apple.com/cn/app/%E5%B0%8F%E7%BA%A2%E4%B9%A6-%E4%BD%A0%E7%9A%84%E7%94%9F%E6%B4%BB%E5%85%B4%E8%B6%A3%E7%A4%BE%E5%8C%BA/id741292507",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/69/c3/c8/69c3c8f3-5b08-09fc-2f8b-a9fe28d47063/AppIcon-0-0-1x_U007epad-0-11-0-85-220.png/120x120bb.png",
+    "sha256": "b27e7a674908fc0edf7290e99d893aae7f970f3da55b8a70ba6ea87552acab58"
+  },
+  "youtube": {
+    "file": "platform-youtube.png",
+    "appId": 544007664,
+    "product": "YouTube",
+    "publisher": "Google",
+    "page": "https://apps.apple.com/cn/app/youtube/id544007664",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/3c/40/e9/3c40e960-3fc8-beba-ad9a-b71ac5c9e59d/logo_youtube_2024_q4_color-0-0-1x_U007emarketing-0-0-0-7-0-0-0-85-220.png/120x120bb.png",
+    "sha256": "6a9cdaa233ab1a1eec2a1bb738312aace5f656d9c5e7c37ba6e8b1186d7efb95"
+  },
+  "x": {
+    "file": "platform-x.png",
+    "appId": 333903271,
+    "product": "X（前身为Twitter）",
+    "publisher": "X Corp.",
+    "page": "https://apps.apple.com/cn/app/x-%E5%89%8D%E8%BA%AB%E4%B8%BAtwitter/id333903271",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/51/9c/3a/519c3a16-6bd6-0b3f-cdff-e9b68b47b297/ProductionAppIcon-0-0-1x_U007emarketing-0-8-0-0-0-85-220.png/120x120bb.png",
+    "sha256": "c4815aed0ba4cff34f4bf50ac57160edd4dc4fb468610cccf4e8809abc8b428b"
+  },
+  "instagram": {
+    "file": "platform-instagram.png",
+    "appId": 389801252,
+    "product": "Instagram",
+    "publisher": "Instagram, Inc.",
+    "page": "https://apps.apple.com/cn/app/instagram/id389801252",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/81/47/e1/8147e182-6737-ae45-e896-ea87bc7f3954/Prod-0-0-1x_U007epad-0-0-0-1-0-0-sRGB-85-220.png/120x120bb.png",
+    "sha256": "17a4b4db8e2d14ebc05ecc544ba64e34b249985589ebe7e6e465c1cdad8d7434"
+  },
+  "threads": {
+    "file": "platform-threads.png",
+    "appId": 6446901002,
+    "product": "Threads",
+    "publisher": "Instagram, Inc.",
+    "page": "https://apps.apple.com/us/app/threads/id6446901002",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/7d/a0/95/7da09558-b065-df5f-6d00-2d75f7e1b1cd/Prod-0-0-1x_U007epad-0-0-0-1-0-0-sRGB-85-220.png/120x120bb.png",
+    "sha256": "3e6817f3a68ce1b73416ee6328381135997f0f0a100eae00c094c70462a034d3"
+  },
+  "channels": {
+    "file": "platform-channels.png",
+    "product": "微信视频号助手",
+    "publisher": "腾讯",
+    "page": "https://channels.weixin.qq.com/platform",
+    "artwork": "https://res.wx.qq.com/t/wx_fed/finder/helper/finder-helper-web/res/favicon-v2.ico",
+    "sha256": "f27ed8a51c12055714e2867bc346e6c8fe5e31719ef7d8675e9f23422ca0b92d"
+  },
+  "wechat": {
+    "file": "platform-wechat.png",
+    "product": "微信公众平台",
+    "publisher": "腾讯",
+    "page": "https://mp.weixin.qq.com/",
+    "artwork": "https://res.wx.qq.com/a/wx_fed/assets/res/OTE0YTAw.png",
+    "sha256": "058bf1b3661dac713bb1807fbadbe1e6c2b1f5513d93ecae61c986ebb76b1edf"
+  }
+}

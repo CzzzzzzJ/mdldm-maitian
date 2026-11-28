@@ -2,6 +2,7 @@
 import { evaluate, withTab, sleep } from './driver.mjs';
 import { SITE } from './site.mjs';
 import { chinaMetricPages, chinaMetricsJs, chinaDetailJs, acfunDetailJs } from './china-metrics.mjs';
+import { scanKuaishouList } from './china-account.mjs';
 
 const J = JSON.stringify;
 // "1.2万" "578.3 萬" "6,017" "5.3K" → 数字
@@ -29,6 +30,33 @@ export const thActionsJs = `(()=>{const L=${J(TH_ACTIONS)};const o={};let hit=0;
       return hit?o:null})()`;
 
 const chinaCollector = id => async options => {
+  const watch = id === 'kuaishou' && /^https:\/\/www\.kuaishou\.com\/short-video\/([\w-]+)(?:[/?#]|$)/i.exec(options.url || '')?.[1];
+  if (watch) {
+    const found = await scanKuaishouList(watch);
+    if (!found) return null;
+    const base = Object.fromEntries(['views','likes','comments'].filter(k=>found[k] != null).map(k=>[k,found[k]]));
+    const path = '/statistics/article/detail/' + watch;
+    const exact = `location.origin==='https://cp.kuaishou.com'&&location.pathname.replace(/\\/$/,'')===${J(path)}`;
+    const activeTab = label => `[...document.querySelectorAll('.data_tab .tab.tab_active')].some(e=>e.getClientRects().length&&e.innerText.trim()===${J(label)})`;
+    const detail = await withTab('https://cp.kuaishou.com' + path, async tab => {
+      const read = async (label, ready) => {
+        for (let i=0;i<7;i++) {
+          const value = await evaluate(tab, `(${exact})&&(${activeTab(label)}) ? (${chinaDetailJs('kuaishou')}) : null`);
+          if (value && ready(value)) return value;
+          if (i<6) await sleep(650);
+        }
+        return null;
+      };
+      const playback = await read('播放数据', m=>m.views != null || Object.keys(m.extra || {}).some(k=>k !== '涨粉')).catch(() => null);
+      const clicked = await evaluate(tab, `(()=>{if(!(${exact}))return false;const a=[...document.querySelectorAll('.data_tab .tab')].filter(e=>e.getClientRects().length&&e.innerText.trim()==='互动效果');if(a.length!==1)return false;a[0].click();return true})()`).catch(() => false);
+      const interaction = clicked ? await read('互动效果', m=>['likes','comments','favorites','shares'].some(k=>m[k] != null) || m.extra?.涨粉 != null).catch(() => null) : null;
+      return {playback,interaction};
+    }, {wait:3000}).catch(() => null);
+    const bonus = detail?.interaction;
+    // 作品列表的累计播放/赞/评优先；详情的图表周期不能覆盖它。
+    for (const field of ['likes','comments','favorites','shares']) if (base[field] == null && bonus?.[field] != null) base[field] = bonus[field];
+    return {...base,extra:{...detail?.playback?.extra,...bonus?.extra}};
+  }
   const { url, row } = chinaMetricPages[id];
   return withTab(url, async tab => {
     for (let i = 0; i < 10; i++) {
@@ -50,27 +78,7 @@ const chinaCollector = id => async options => {
           }, {wait:4000}).catch(() => null);
           return detail ? {...base,...detail,extra:{...base.extra,...detail.extra}} : base;
         }
-        const watch = /^https:\/\/www\.kuaishou\.com\/short-video\/([a-z0-9]+)(?:[/?#]|$)/i.exec(options.url || '')?.[1];
-        if (!base || id !== 'kuaishou' || !watch) return base;
-        const detail = await withTab(`https://cp.kuaishou.com/statistics/article/detail/${watch}`, async t => {
-          const exact = `location.hostname==='cp.kuaishou.com'&&location.pathname===${J('/statistics/article/detail/' + watch)}`;
-          let playback = null;
-          for (let n=0;n<7;n++) {
-            if (await evaluate(t, exact)) playback = await evaluate(t, chinaDetailJs());
-            if (playback) break;
-            await sleep(800);
-          }
-          const clicked = await evaluate(t, `(()=>{if(!(${exact}))return false;const a=[...document.querySelectorAll('.data_tab .tab')].filter(e=>e.getClientRects().length&&e.innerText.trim()==='互动效果');if(a.length!==1)return false;a[0].click();return true})()`);
-          let interaction = null;
-          if (clicked) for(let n=0;n<8;n++) {
-            await sleep(650);
-            if (!await evaluate(t, exact)) break;
-            const r = await evaluate(t, chinaDetailJs());
-            if (r?.favorites != null || r?.shares != null || r?.extra?.涨粉 != null) { interaction = r; break; }
-          }
-          return {...playback,...interaction, extra:{...playback?.extra,...interaction?.extra}};
-        }, {wait:3500}).catch(() => null);
-        return detail ? {...base,...detail,extra:{...base.extra,...detail.extra}} : base;
+        return base;
       }
       if (i < 9) await sleep(1000);
     }

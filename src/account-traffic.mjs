@@ -8,6 +8,7 @@ export function initAccountTraffic(db) {
     CREATE TABLE IF NOT EXISTS account_traffic_daily (
     day TEXT, platform TEXT, views INTEGER, videos INTEGER, collected_at TEXT, PRIMARY KEY(day,platform));
     CREATE TABLE IF NOT EXISTS account_traffic_state (platform TEXT PRIMARY KEY, synced_at TEXT, count INTEGER, error TEXT);
+    CREATE TABLE IF NOT EXISTS account_traffic_verified (platform TEXT PRIMARY KEY, synced_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS account_traffic_identity (platform TEXT PRIMARY KEY, uid TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS account_traffic_lock (id INTEGER PRIMARY KEY CHECK(id=1),owner TEXT,until INTEGER);`);
 }
@@ -37,6 +38,7 @@ export function saveAccountVideos(db, platform, rows, now = new Date().toISOStri
     const views = rows.every(r => r.views != null) ? rows.reduce((n, r) => n + r.views, 0) : null;
     db.prepare('INSERT INTO account_traffic_daily VALUES (?,?,?,?,?) ON CONFLICT(day,platform) DO UPDATE SET views=excluded.views,videos=excluded.videos,collected_at=excluded.collected_at').run(day, platform, views, rows.length, now);
     db.prepare("INSERT INTO account_traffic_state VALUES (?,?,?, '') ON CONFLICT(platform) DO UPDATE SET synced_at=excluded.synced_at,count=excluded.count,error=''").run(platform, now, rows.length);
+    if (platform === 'kuaishou') db.prepare('INSERT OR IGNORE INTO account_traffic_verified VALUES (?,?)').run(platform, now);
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
@@ -46,8 +48,15 @@ export function accountTrafficView(db, ids) {
   const placeholders = ids.map(() => '?').join(',');
   const videos = db.prepare(`SELECT platform,id,title,url,published_at AS publishedAt,views,likes,comments,favorites,shares,collected_at AS collectedAt
     FROM account_videos WHERE active=1 AND platform IN (${placeholders}) ORDER BY published_at DESC,platform,id`).all(...ids);
-  const history = db.prepare(`SELECT day,platform,views,videos FROM account_traffic_daily WHERE platform IN (${placeholders}) AND day>=date('now','-30 day') ORDER BY day,platform`).all(...ids);
-  const saved = db.prepare(`SELECT platform AS id,synced_at AS syncedAt,count,error FROM account_traffic_state WHERE platform IN (${placeholders})`).all(...ids);
+  const history = db.prepare(`SELECT d.day,d.platform,d.views,d.videos FROM account_traffic_daily d
+    LEFT JOIN account_traffic_verified v ON v.platform=d.platform
+    WHERE d.platform IN (${placeholders}) AND d.day>=date('now','-30 day')
+      AND (d.platform<>'kuaishou' OR d.videos<>0 OR d.collected_at>=v.synced_at) ORDER BY d.day,d.platform`).all(...ids);
+  const saved = db.prepare(`SELECT s.platform AS id,s.synced_at AS syncedAt,s.count,s.error,v.synced_at AS verifiedAt
+    FROM account_traffic_state s LEFT JOIN account_traffic_verified v ON v.platform=s.platform
+    WHERE s.platform IN (${placeholders})`).all(...ids).map(({ verifiedAt, ...s }) =>
+      s.id === 'kuaishou' && s.count === 0 && (!verifiedAt || s.syncedAt < verifiedAt)
+        ? { ...s, syncedAt:null, count:null, error:s.error || '旧记录未核实，请重新采集' } : s);
   return { videos, history, statuses: ids.map(id => saved.find(s => s.id === id) || {id,syncedAt:null,count:0,error:''}) };
 }
 

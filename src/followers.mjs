@@ -1,7 +1,7 @@
 // 粉丝采集：只读自己账号的粉丝数，每天一次。平台后台自带趋势的（B站 90 天、小红书 30 天、视频号 7 天、知识站 30 天）顺手补历史。
 import { evaluate, withTab, sleep } from './driver.mjs';
 import { num, TH_FOLLOWERS } from './metrics.mjs';
-import { db } from './db.mjs';
+import { db, setMeta } from './db.mjs';
 import { config } from './feishu.mjs';
 import { SITE } from './site.mjs';
 import { readChinaFans } from './china-account.mjs';
@@ -82,6 +82,12 @@ const has = db.prepare(`SELECT source FROM followers WHERE day=? AND platform=?`
 // 存今天的实测值；历史只补还没有实测值的日子
 export function saveFollowers(platform, r) {
   const now = new Date().toISOString(), t = today();
+  // 快手创作者主页只显示所选时间区间的净增时，仍保留这个独立指标，
+  // 不把负数、涨粉数或空值覆盖到历史粉丝总数。
+  if (platform === 'kuaishou' && Number.isSafeInteger(r.period?.net) &&
+      Number.isSafeInteger(r.period?.days) && r.period.days > 0)
+    setMeta('kuaishouFanPeriod', JSON.stringify({net:r.period.net,days:r.period.days,collectedAt:now}));
+  if (r.total == null) return 0;
   up.run(t, platform, r.total, null, null, 'live', now);
   let hist = (r.history || []).filter(h => h.day < t).sort((a, b) => a.day < b.day ? 1 : -1), n = 0;
   if (hist.length && hist[0].total == null) {   // 只有每日净增：从今天的总数往回推每天结束时的总数（今天的净增取平台给的当日数，没有就按 0 算）
@@ -94,7 +100,13 @@ export async function collectFollowers(only, skip = []) {
   const out = {}, off = new Set([...(config.disabled || []), ...skip]);
   for (const [p, fn] of Object.entries(followerCollectors)) {
     if ((p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p) || (isExtraManual(p) && !extraEnabled(config).includes(p))) continue;
-    try { const r = await fn(); if (!r) { out[p] = '没读到'; continue; } const n = saveFollowers(p, r); out[p] = { total: r.total, backfilled: n }; }
+    try {
+      const r = await fn();
+      if (!r) { out[p] = '没读到'; continue; }
+      const n = saveFollowers(p, r);
+      out[p] = r.total != null ? { total:r.total, backfilled:n } : r.period ?
+        `近 ${r.period.days} 天净增 ${r.period.net >= 0 ? '+' : ''}${r.period.net}（未提供粉丝总数）` : '没读到';
+    }
     catch (e) { out[p] = '出错：' + e.message.slice(0, 80); }
   }
   return out;
