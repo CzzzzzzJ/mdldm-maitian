@@ -18,8 +18,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
 import { pluginDir } from './plugin.mjs';
+import { unsupportedNewChannels, upgradeMessage } from './publish-channels.mjs';
 // 字段规则来自麦田发布助手（默认是商店版，跟着插件自动更新）
-const { validate } = await import(pathToFileURL(join(pluginDir(), 'lib', 'bundle.js')).href);
+const { validate, PLATFORMS } = await import(pathToFileURL(join(pluginDir(), 'lib', 'bundle.js')).href);
 
 const args = process.argv.slice(2);
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args.splice(i, 2)[1] : null; };
@@ -74,11 +75,20 @@ const has = (k) => !!covers[k];
 const pick = (...ks) => ks.filter(has);
 
 const platforms = {};
+const categoryOf = s => s.match(/^\*\*分区：\*\*[ \t]*(\S.*)$/m)?.[1].trim() || field(s, '分区');
 let s;
-if ((s = sec('B站'))) platforms.bilibili = { covers: pick('4x3'), title: field(s, '标题'), desc: field(s, '简介'), tags: hashTags(field(s, '标签') || '') };
+if ((s = sec('B站'))) {
+  const category = categoryOf(s);
+  platforms.bilibili = { covers: pick('4x3'), title: field(s, '标题'), desc: field(s, '简介'), tags: hashTags(field(s, '标签') || ''), ...(category ? { category } : {}) };
+}
 if ((s = sec('小红书'))) { const b = splitTopics(field(s, '正文') || ''); platforms.xhs = { covers: pick('3x4'), title: field(s, '标题'), body: b.body, topics: b.topics }; }
 if ((s = sec('抖音'))) { const b = splitTopics(field(s, '正文') || ''); platforms.douyin = { covers: pick('4x3', '3x4'), title: field(s, '标题'), body: b.body, topics: b.topics }; }
 if ((s = sec('视频号'))) { const b = splitTopics(field(s, '描述') || ''); platforms.channels = { covers: pick('4x3', '3x4'), shortTitle: field(s, '短标题'), body: b.body, topics: b.topics }; }
+if ((s = sec('A站') ?? sec('A 站') ?? sec('AcFun')) !== null) {
+  const category = categoryOf(s);
+  platforms.acfun = { covers: pick('16x9'), title: field(s, '标题'), desc: field(s, '简介'), tags: hashTags(field(s, '标签') || ''), ...(category ? { category } : {}) };
+}
+if ((s = sec('快手')) !== null) platforms.kuaishou = { covers: pick('3x4', '16x9').slice(0, 1), caption: field(s, '文案') };
 if ((s = sec('YouTube'))) platforms.youtube = { covers: pick('16x9'), title: field(s, '标题'), desc: field(s, '简介'), tags: (field(s, '标签') || '').split(/[,，]/).map(x => x.trim()).filter(Boolean) };
 if ((s = sec('X'))) {
   platforms.x = { covers: [], text: clean(s) };
@@ -127,6 +137,7 @@ if (existsSync(target)) {
 writeFileSync(target, JSON.stringify(out, null, 2) + '\n');
 
 const { errors, warnings } = validate(out, new Set(files));
+warnings.push(...unsupportedNewChannels(out.platforms, id => Object.hasOwn(PLATFORMS || {}, id)).map(upgradeMessage));
 // Instagram 网页上传单个文件最大 1GB（PolarisCreationConstants.MAX_FILE_SIZE）：成片太大要先转一版
 if (out.platforms.instagram && !out.platforms.instagram.video && video && statSync(join(dir, video)).size > 1e9) {
   warnings.push(`Instagram：成片 ${(statSync(join(dir, video)).size / 1e9).toFixed(2)}GB，超过网页上传 1GB 上限，先转一版放进工程目录（ffmpeg -i 成片.mp4 -r 30 -c:v h264_videotoolbox -b:v 5000k -c:a aac -b:a 128k -movflags +faststart 成片-ig.mp4），重新生成时会自动给 Instagram 用`);

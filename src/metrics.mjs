@@ -1,6 +1,7 @@
 // 流量采集：只读自己创作者后台的数据，每天一次。按作品 ID 匹配（标题在平台上可能改过）。
 import { evaluate, withTab, sleep } from './driver.mjs';
 import { SITE } from './site.mjs';
+import { chinaMetricPages, chinaMetricsJs, chinaDetailJs, acfunDetailJs } from './china-metrics.mjs';
 
 const J = JSON.stringify;
 // "1.2万" "578.3 萬" "6,017" "5.3K" → 数字
@@ -27,7 +28,59 @@ export const thActionsJs = `(()=>{const L=${J(TH_ACTIONS)};const o={};let hit=0;
       for(const [k,ls] of Object.entries(L)){const s=[...document.querySelectorAll('svg')].find(s=>ls.includes(s.getAttribute('aria-label')||(s.querySelector('title')||{}).textContent||''));const b=s&&s.closest('[role=button],button');if(!b){o[k]=null;continue}hit++;o[k]=b.innerText.trim()||'0'}
       return hit?o:null})()`;
 
+const chinaCollector = id => async options => {
+  const { url, row } = chinaMetricPages[id];
+  return withTab(url, async tab => {
+    for (let i = 0; i < 10; i++) {
+      const state = await evaluate(tab, `({rows:!!document.querySelector(${J(row)}), login:/\\/login\\b/.test(location.pathname)})`).catch(() => null);
+      if (state?.login) return null;
+      if (state?.rows) {
+        const base = await evaluate(tab, chinaMetricsJs(id, options));
+        if (base && id === 'acfun') {
+          const work = /^https:\/\/www\.acfun\.cn\/v\/(ac\d+)(?:[/?#]|$)/.exec(options.url || '')?.[1];
+          const detail = work && await withTab('https://www.acfun.cn/v/' + work, async t => {
+            for (let n=0;n<7;n++) {
+              if (await evaluate(t, `location.hostname==='www.acfun.cn'&&location.pathname.replace(/\\/$/,'')===${J('/v/' + work)}`)) {
+                const m = await evaluate(t, acfunDetailJs);
+                if (Object.keys(m).length) return m;
+              }
+              await sleep(650);
+            }
+            return null;
+          }, {wait:4000}).catch(() => null);
+          return detail ? {...base,...detail,extra:{...base.extra,...detail.extra}} : base;
+        }
+        const watch = /^https:\/\/www\.kuaishou\.com\/short-video\/([a-z0-9]+)(?:[/?#]|$)/i.exec(options.url || '')?.[1];
+        if (!base || id !== 'kuaishou' || !watch) return base;
+        const detail = await withTab(`https://cp.kuaishou.com/statistics/article/detail/${watch}`, async t => {
+          const exact = `location.hostname==='cp.kuaishou.com'&&location.pathname===${J('/statistics/article/detail/' + watch)}`;
+          let playback = null;
+          for (let n=0;n<7;n++) {
+            if (await evaluate(t, exact)) playback = await evaluate(t, chinaDetailJs());
+            if (playback) break;
+            await sleep(800);
+          }
+          const clicked = await evaluate(t, `(()=>{if(!(${exact}))return false;const a=[...document.querySelectorAll('.data_tab .tab')].filter(e=>e.getClientRects().length&&e.innerText.trim()==='互动效果');if(a.length!==1)return false;a[0].click();return true})()`);
+          let interaction = null;
+          if (clicked) for(let n=0;n<8;n++) {
+            await sleep(650);
+            if (!await evaluate(t, exact)) break;
+            const r = await evaluate(t, chinaDetailJs());
+            if (r?.favorites != null || r?.shares != null || r?.extra?.涨粉 != null) { interaction = r; break; }
+          }
+          return {...playback,...interaction, extra:{...playback?.extra,...interaction?.extra}};
+        }, {wait:3500}).catch(() => null);
+        return detail ? {...base,...detail,extra:{...base.extra,...detail.extra}} : base;
+      }
+      if (i < 9) await sleep(1000);
+    }
+    return null;
+  }, { wait: 3000 });
+};
+
 export const collectors = {
+  acfun: chinaCollector('acfun'),
+  kuaishou: chinaCollector('kuaishou'),
   async bilibili({ url, p }) {
     const bvid = idOf(url, /video\/(BV\w+)/);
     const st = await withTab('https://member.bilibili.com/platform/upload-manager/article', (t) => evaluate(t, `fetch('/x/web/archives?status=is_pubing%2Cpubed%2Cnot_pubed&pn=1&ps=50&coop=1',{credentials:'include'}).then(r=>r.json()).then(x=>{const a=(x.data&&x.data.arc_audits||[]).find(a=>a.Archive.bvid===${J(bvid)}||a.Archive.title===${J(p.title)});return a?a.stat:null})`));

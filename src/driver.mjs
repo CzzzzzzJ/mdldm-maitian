@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { config } from './feishu.mjs';
 import * as bridge from './bridge.mjs';
 import { pluginDir, pluginInfo } from './plugin.mjs';
+import { isExtraManual, upgradeMessage } from './publish-channels.mjs';
 
 export const mode = (process.env.HUB_DRIVER || config.driver || 'direct');
 export const sleep = bridge.sleep;
@@ -37,6 +38,16 @@ export async function busy() { if (mode !== 'plugin') return false; const j = aw
 // 商店里的插件版本还没有某个平台的适配器（比如新平台刚加、商店还在审核）：这几个平台先跳过并说明
 const split = (pub, ids) => [ids.filter(id => pub.ADAPTERS[id]), ids.filter(id => !pub.ADAPTERS[id])];
 const tooOld = (id) => { const p = pluginInfo(); return `麦田发布助手 ${p.version || ''}（${p.source === 'store' ? '商店版' : '本地'}）还不支持 ${id}，等插件更新`; };
+export async function missingNewChannels(ids) {
+  const extra = ids.filter(isExtraManual);
+  if (!extra.length) return [];
+  if (mode !== 'plugin') {
+    const { pub } = await load();
+    return extra.filter(id => !Object.hasOwn(pub.ADAPTERS || {}, id));
+  }
+  const info = await bridge.call({ op: 'ping' }, 8000);
+  return extra.filter(id => !info?.platforms?.includes(id));
+}
 
 // 跑一批平台；onState(st) 在每次状态变化时调用，st = {id, status, logs, tabId}
 export async function runBatch(project, batch, onState, onStall) {
@@ -62,15 +73,23 @@ export async function runBatch(project, batch, onState, onStall) {
   }
 }
 export async function checkLogin(ids) {
-  if (mode === 'plugin') { const r = await bridge.panel('checkLogin', [ids], 120000); return r && r.ok ? r.result : {}; }
+  const absent = await missingNewChannels(ids);
+  const missingResults = Object.fromEntries(absent.map(id => [id, { ok: false, unsupported: true, reason: upgradeMessage(id) }]));
+  ids = ids.filter(id => !absent.includes(id));
+  if (!ids.length) return missingResults;
+  if (mode === 'plugin') { const r = await bridge.panel('checkLogin', [ids], 120000); return { ...(r?.ok ? r.result : {}), ...missingResults }; }
   const { pub } = await load(); const [ok, missing] = split(pub, ids);
   const r = ok.length ? await pub.preflight(ok, { keepTabs: false }) : {};
   for (const id of missing) r[id] = { ok: false, reason: tooOld(id) };
-  return r;
+  return { ...r, ...missingResults };
 }
 export async function links(project, ids) {
-  if (mode === 'plugin') { const r = await bridge.panel('links', [project, ids], 600000); if (!r || !r.ok) throw new Error(r ? r.error : '没有响应'); return r.result; }
-  return (await load()).pub.collectLinks(project, ids, {});
+  const absent = await missingNewChannels(ids);
+  const missingResults = Object.fromEntries(absent.map(id => [id, { status: '未支持', url: '', note: upgradeMessage(id) }]));
+  ids = ids.filter(id => !absent.includes(id));
+  if (!ids.length) return missingResults;
+  if (mode === 'plugin') { const r = await bridge.panel('links', [project, ids], 600000); if (!r || !r.ok) throw new Error(r ? r.error : '没有响应'); return { ...r.result, ...missingResults }; }
+  return { ...await (await load()).pub.collectLinks(project, ids, {}), ...missingResults };
 }
 // 登录不需要插件代码：只开专用 Chrome 和页面（第一次还没装插件时也能用）
 export async function openForLogin(urls) { const shim = await import('./chrome-shim.mjs'); await shim.launchChrome({ foreground: true }); for (const u of urls) await shim.chrome.tabs.create({ url: u, active: true }); }

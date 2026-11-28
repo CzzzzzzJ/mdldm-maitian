@@ -21,7 +21,8 @@ const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
-const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'threads', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
+import { extraEnabled } from './publish-channels.mjs';
+const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', 'threads', ...extraEnabled(config), ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 const platformList = () => PLATFORMS.filter(id => id !== 'zsz' || !SITE?.salesOnly).map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
 
@@ -35,7 +36,7 @@ function episodeView(ep, full = false) {
     return { platform: t.platform, name: NAMES[t.platform] || t.platform, state: t.state, stateCn: STATE_CN[t.state] || t.state, detail: t.detail || '', url: t.url || '', updatedAt: t.updated_at,
       m: m && { day: m.day, views: m.views, likes: m.likes, comments: m.comments, favorites: m.favorites, shares: m.shares, extra: JSON.parse(m.extra || '{}') },
       publishedAt: t.published_at || p.published_at || '', publishedTitle: t.published_title || p.published_title || '',
-      ...(full ? { copy: { title: p.title || p.shortTitle || '', body: p.desc || p.body || p.text || p.description || '', tags: p.tags || p.topics || [], covers: p.covers || [] }, shot: fs.existsSync(path.join(ep.dir, '发布档案', `${t.platform}.jpg`)) } : {}) };
+      ...(full ? { copy: { title: p.title || p.shortTitle || '', body: p.desc || p.body || p.text || p.description || p.caption || '', tags: p.tags || p.topics || [], covers: p.covers || [] }, shot: fs.existsSync(path.join(ep.dir, '发布档案', `${t.platform}.jpg`)) } : {}) };
   });
   // 封面缓存版本号：封面文件被替换（同 URL、新内容）时改 v，避免浏览器继续用旧的占位图
   const covers = Object.keys(pj.covers || {});

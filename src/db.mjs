@@ -36,10 +36,10 @@ for (const name of ['published_at', 'published_title']) {
   if (!taskColumns.has(name)) db.exec(`ALTER TABLE tasks ADD COLUMN ${name} TEXT`);
 }
 const now = () => new Date().toISOString();
-export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', threads: 'Threads', wechat: '公众号', zsz: '知识站' };
+export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', acfun: 'A站', kuaishou: '快手', youtube: 'YouTube', x: 'X', instagram: 'Instagram', threads: 'Threads', wechat: '公众号', zsz: '知识站' };
 // 已经到位、不允许再跑的状态（防重）
-export const LOCKED = ['filled', 'awaiting_user', 'scheduled', 'published'];
-export const STATE_CN = { planned: '计划中', pending: '等待', running: '进行中', filled: '已填好', awaiting_user: '待你点发布', scheduled: '已定时', published: '已发布', failed: '异常', not_logged_in: '未登录', stopped: '已停止', skipped: '跳过' };
+export const LOCKED = ['filled', 'awaiting_user', 'reviewing', 'scheduled', 'published'];
+export const STATE_CN = { planned: '计划中', pending: '等待', running: '进行中', filled: '已填好', awaiting_user: '待你点发布', reviewing: '审核中', scheduled: '已定时', published: '已发布', failed: '异常', not_logged_in: '未登录', stopped: '已停止', skipped: '跳过' };
 
 export function upsertEpisode(e) {
   db.prepare(`INSERT INTO episodes (id, episode, name, dir, schedule, created_at) VALUES (?,?,?,?,?,?)

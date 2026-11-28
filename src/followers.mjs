@@ -4,6 +4,8 @@ import { num, TH_FOLLOWERS } from './metrics.mjs';
 import { db } from './db.mjs';
 import { config } from './feishu.mjs';
 import { SITE } from './site.mjs';
+import { readChinaFans } from './china-account.mjs';
+import { extraEnabled, isExtraManual } from './publish-channels.mjs';
 
 db.exec(`CREATE TABLE IF NOT EXISTS followers (day TEXT, platform TEXT, total INTEGER, gain INTEGER, loss INTEGER, source TEXT, collected_at TEXT, PRIMARY KEY (day, platform));`);
 const dayOf = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
@@ -14,6 +16,8 @@ const SHADOW_TEXT = `(()=>{const R=document.querySelector('wujie-app')&&document
 
 // 每个采集器返回 { total, history: [{ day, total?, net?, gain?, loss? }] }；history 里只有 net 的，由 fill() 从今天的总数往回推
 export const followerCollectors = {
+  acfun: () => readChinaFans('acfun'),
+  kuaishou: () => readChinaFans('kuaishou'),
   async bilibili() {
     const r = await withTab('https://member.bilibili.com/platform/home', (t) => evaluate(t, `Promise.all([${get('/x/web/index/stat')},${get('/x/web/data/v2/overview/stat/graph?period=2&s_locale=zh_CN&type=fan')}]).then(([a,b])=>({total:a.data&&a.data.total_fans,inc:a.data&&a.data.incr_fans,tend:(b.data&&b.data.tendency)||[]}))`));
     return r && r.total != null && { total: r.total, todayNet: r.inc || 0, history: r.tend.map(x => ({ day: dayOf(x.date_key * 1000), net: x.total_inc })) };
@@ -89,7 +93,7 @@ export function saveFollowers(platform, r) {
 export async function collectFollowers(only, skip = []) {
   const out = {}, off = new Set([...(config.disabled || []), ...skip]);
   for (const [p, fn] of Object.entries(followerCollectors)) {
-    if ((p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p)) continue;
+    if ((p === 'zsz' && SITE?.salesOnly) || (only && !only.includes(p)) || off.has(p) || (isExtraManual(p) && !extraEnabled(config).includes(p))) continue;
     try { const r = await fn(); if (!r) { out[p] = '没读到'; continue; } const n = saveFollowers(p, r); out[p] = { total: r.total, backfilled: n }; }
     catch (e) { out[p] = '出错：' + e.message.slice(0, 80); }
   }
