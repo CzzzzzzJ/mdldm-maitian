@@ -20,6 +20,7 @@ const secret = 'https://example.invalid/private-hook';
 function fixture(getSettings = true, overviewData = overview) {
   const elements = new Map([['#app', {}]]);
   const listeners = {}, calls = [];
+  let schedules = { sales: { mode: 'interval', minutes: 60 }, daemon: { mode: 'interval', minutes: 60 } };
   const ctx = vm.createContext({
     location: { hash: '#/system', search: '' }, setInterval() {}, clearInterval() {}, setTimeout() {}, addEventListener() {},
     document: {
@@ -29,9 +30,11 @@ function fixture(getSettings = true, overviewData = overview) {
     confirm: () => true,
     fetch: async (url, options) => {
       calls.push([url, options ? JSON.parse(options.body) : null]);
+      if (url === '/api/schedules' && options) schedules = JSON.parse(options.body).schedules;
       const responses = {
+        '/api/schedules': schedules,
         '/api/overview': overviewData, '/api/bilibili-accounts': getSettings ? settings : null,
-        '/api/integrations': { feishu: { webhook: secret, login: true }, site: {} },
+        '/api/integrations': { feishu: { webhook: secret, login: true }, site: { salesOnly: overviewData.siteSalesOnly }, schedules },
         '/api/integrations/feishu': { feishu: { configured: true, login: true } },
         '/api/platform-toggle': { ok: true }, '/api/action': { ok: true },
       };
@@ -130,4 +133,37 @@ test('account edits use one atomic replacement request and no publisher platform
   ]);
   assert.ok(!calls.some(([url]) => url === '/api/platform-toggle'));
   assert.equal(button.disabled, false);
+});
+
+test('system schedule editor keeps unsaved input across polls and independently saves Shanghai times and intervals', async () => {
+  const { elements, calls, listeners, run } = fixture(true, { ...overview, siteSalesOnly: true });
+  await run('load()');
+  const app = elements.get('#app');
+  assert.match(app.innerHTML, /自动调度/);
+  assert.match(app.innerHTML, /小鹅通销售与订单<\/dt><dd>每 60 分钟/);
+  assert.match(app.innerHTML, /守护进程检查<\/dt><dd>每 60 分钟/);
+  assert.doesNotMatch(app.innerHTML, /每 5 分钟/);
+  const panel = {};
+  elements.set('#schedule-panel', panel);
+  await listeners.click[0]({ target: { closest: s => s === '[data-edit-schedules]' ? {} : null } });
+  assert.match(panel.innerHTML, /for="sales-times">每天的时间（上海时间）/);
+  assert.match(panel.innerHTML, /<legend>守护进程检查<\/legend>/);
+
+  const row = (key, mode, minutes, times) => ({
+    dataset: { schedule: key },
+    querySelector: selector => ({ value: selector === 'select' ? mode : selector.endsWith('-minutes') ? minutes : times }),
+  });
+  const rows = [row('sales', 'daily', '60', '08:00，20:30'), row('daemon', 'interval', '120', '')];
+  const form = { id: 'schedule-form', querySelectorAll: () => rows, querySelector: () => ({}) };
+  elements.set('#schedule-form', form);
+  app.innerHTML = 'draft';
+  await run('load()');
+  assert.equal(app.innerHTML, 'draft');
+  await listeners.submit[0]({ target: form, preventDefault() {} });
+  assert.deepEqual(calls.find(([url, data]) => url === '/api/schedules' && data)?.[1], {
+    expectedSchedules: { sales: { mode: 'interval', minutes: 60 }, daemon: { mode: 'interval', minutes: 60 } },
+    schedules: { sales: { mode: 'daily', times: ['08:00', '20:30'] }, daemon: { mode: 'interval', minutes: 120 } },
+  });
+  assert.match(panel.innerHTML, /每天 08:00、20:30/);
+  assert.match(panel.innerHTML, /每 120 分钟/);
 });

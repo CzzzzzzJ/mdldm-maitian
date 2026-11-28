@@ -3,7 +3,8 @@ import http from 'node:http'; import crypto from 'node:crypto'; import fs from '
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
 import { SITE, siteOn, refreshSite, matchesSiteData } from './site.mjs';
-import { applyFeishuPatch, applySitePatch, saveConfig, testSite } from './config-admin.mjs';
+import { applyFeishuPatch, applySitePatch, saveConfig, saveSchedules, testSite } from './config-admin.mjs';
+import { normalizeSchedules, notifyScheduleChange } from './schedules.mjs';
 import { learnOn, learnUrl } from './learn.mjs';
 import { buildSalesSummary, salesDateRange } from './sales.mjs';
 import { review } from './review.mjs';
@@ -146,6 +147,10 @@ function thumb(f, w) {
 
 // ---------- 集成管理（飞书 / 知识站） ----------
 const metaJson = (k) => { const v = getMeta(k); if (!v) return null; try { return JSON.parse(v); } catch { return null; } };
+function savedSchedules() {
+  const disk = JSON.parse(fs.readFileSync(CFG, 'utf8'));
+  return normalizeSchedules(disk.schedules);
+}
 function integrations() {
   const cs = config.site || {};
   const summary = SITE && !SITE.salesOnly && matchesSiteData(getMeta('siteShopName')) ? (() => {
@@ -162,7 +167,7 @@ function integrations() {
     },
   };
 }
-const readJson = (req) => new Promise((res, rej) => { let b = ''; req.on('data', (d) => { b += d; if (b.length > 20000) req.destroy(); }); req.on('end', () => { try { res(JSON.parse(b || '{}')); } catch { res({}); } }); req.on('error', rej); });
+const readJson = (req, limit = 20000) => new Promise((res, rej) => { let b = ''; req.on('data', (d) => { b += d; if (b.length > limit) req.destroy(); }); req.on('end', () => { try { res(JSON.parse(b || '{}')); } catch { res({}); } }); req.on('error', rej); });
 const snapConfig = () => JSON.parse(JSON.stringify(config));
 const rollbackConfig = (backup) => { for (const k of Object.keys(config)) delete config[k]; Object.assign(config, backup); };
 
@@ -190,6 +195,23 @@ async function handle(req, res) {
     if (u.searchParams.get('key') === W.key) return send(res, 302, '', 'text/plain', { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, location: '/' });
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
+  }
+  const scheduleRoute = u.pathname === '/api/schedules';
+  const integrationsView = u.pathname === '/api/integrations' && req.method === 'GET';
+  let settingsAccess = true;
+  if (!W.key && (scheduleRoute || integrationsView)) {
+    settingsAccess = (LOGIN && sessionOk(req)) || !!(await accessEmail(req, W.access));
+    if (scheduleRoute && !settingsAccess) return send(res, 401, { error: '请配置网页口令并登录' });
+  }
+  if (scheduleRoute) {
+    if (req.method === 'GET') return send(res, 200, savedSchedules());
+    if (req.method !== 'POST') return send(res, 405, { error: '请求方法不支持' }, undefined, { allow: 'GET, POST' });
+    const origin = req.headers.origin;
+    const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+    if (req.headers['sec-fetch-site'] === 'cross-site' || (origin && origin !== protocol + '://' + req.headers.host)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, { error: '请发送 JSON' });
+    try { return send(res, 200, saveSchedules(await readJson(req, 65536))); }
+    catch (e) { return send(res, e.status || 500, { error: e.status ? e.message : '保存调度时间失败' }); }
   }
   if (u.pathname === '/api/bilibili-accounts') {
     const { bilibiliAccountView, saveBilibiliAccounts, InvalidBilibiliAccounts } = await import('./config-admin.mjs');
@@ -306,7 +328,7 @@ async function handle(req, res) {
     child.on('close', code => finish(code === 0));
     return send(res, 200, { ok: true });
   }
-  if (u.pathname === '/api/integrations' && req.method === 'GET') return send(res, 200, integrations());
+  if (integrationsView) return send(res, 200, { ...integrations(), ...(settingsAccess && { schedules: savedSchedules() }) });
   if (u.pathname === '/api/integrations/feishu' && req.method === 'POST') {
     const a = await readJson(req), backup = snapConfig();
     try { applyFeishuPatch(config, { webhook: String(a.webhook ?? ''), login: a.login === true }); saveConfig(config); }
@@ -325,6 +347,7 @@ async function handle(req, res) {
       return send(res, /先填站点地址/.test(msg) ? 400 : 500, { error: /先填站点地址/.test(msg) ? msg : ('写配置失败：' + msg) });
     }
     refreshSite();
+    notifyScheduleChange();
     return send(res, 200, { site: integrations().site });
   }
   if (u.pathname === '/api/integrations/feishu/test' && req.method === 'POST') {
